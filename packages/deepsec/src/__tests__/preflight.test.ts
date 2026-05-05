@@ -155,6 +155,7 @@ describe("applyAiGatewayDefaults", () => {
   beforeEach(() => {
     saved = {
       AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
+      VERCEL_OIDC_TOKEN: process.env.VERCEL_OIDC_TOKEN,
       ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
       OPENAI_API_KEY: process.env.OPENAI_API_KEY,
       ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
@@ -200,5 +201,24 @@ describe("applyAiGatewayDefaults", () => {
     applyAiGatewayDefaults();
     expect(process.env.ANTHROPIC_BASE_URL).toBe("https://api.anthropic.com");
     expect(process.env.OPENAI_BASE_URL).toBe("https://ai-gateway.vercel.sh/v1");
+  });
+
+  it("falls back to VERCEL_OIDC_TOKEN when AI_GATEWAY_API_KEY is unset", () => {
+    process.env.VERCEL_OIDC_TOKEN = "oidc-tok";
+    applyAiGatewayDefaults();
+    expect(process.env.AI_GATEWAY_API_KEY).toBe("oidc-tok");
+    expect(process.env.ANTHROPIC_AUTH_TOKEN).toBe("oidc-tok");
+    expect(process.env.OPENAI_API_KEY).toBe("oidc-tok");
+    expect(process.env.ANTHROPIC_BASE_URL).toBe("https://ai-gateway.vercel.sh");
+    expect(process.env.OPENAI_BASE_URL).toBe("https://ai-gateway.vercel.sh/v1");
+  });
+
+  it("prefers an explicit AI_GATEWAY_API_KEY over VERCEL_OIDC_TOKEN", () => {
+    process.env.AI_GATEWAY_API_KEY = "gw-key";
+    process.env.VERCEL_OIDC_TOKEN = "oidc-tok";
+    applyAiGatewayDefaults();
+    expect(process.env.AI_GATEWAY_API_KEY).toBe("gw-key");
+    expect(process.env.ANTHROPIC_AUTH_TOKEN).toBe("gw-key");
+    expect(process.env.OPENAI_API_KEY).toBe("gw-key");
   });
 });

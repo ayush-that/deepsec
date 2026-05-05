@@ -3,13 +3,6 @@ import { config as dotenvConfig } from "dotenv";
 dotenvConfig({ path: ".env.local" });
 dotenvConfig(); // also load .env as fallback
 
-import { applyAiGatewayDefaults } from "./preflight.js";
-
-// If AI_GATEWAY_API_KEY is set, expand it into ANTHROPIC_AUTH_TOKEN /
-// OPENAI_API_KEY / *_BASE_URL before any agent module reads them. Must
-// run after dotenv and before the command modules import.
-applyAiGatewayDefaults();
-
 import { getRegistry } from "@deepsec/core";
 import { Command } from "commander";
 import { enrichCommand } from "./commands/enrich.js";
@@ -26,6 +19,7 @@ import { scanCommand } from "./commands/scan.js";
 import { statusCommand } from "./commands/status.js";
 import { triageCommand } from "./commands/triage.js";
 import { loadConfig } from "./load-config.js";
+import { applyAiGatewayDefaults } from "./preflight.js";
 import { getDeepsecVersion } from "./version.js";
 
 const program = new Command();
