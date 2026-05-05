@@ -345,6 +345,11 @@ process.on("unhandledRejection", printFatal);
 process.on("uncaughtException", printFatal);
 
 async function main() {
+  // Expand AI_GATEWAY_API_KEY (or fall back to a Vercel OIDC token) into
+  // the per-SDK env vars before any command handler instantiates an agent.
+  // Must run before loadConfig in case the user's deepsec.config.ts reads
+  // these vars at module load.
+  await applyAiGatewayDefaults();
   await loadConfig();
   // Plugins may register their own subcommands.
   for (const register of getRegistry().commands) {
