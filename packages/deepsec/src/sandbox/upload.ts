@@ -147,17 +147,19 @@ export async function makeTarball(
     }
     filteredList = Buffer.from(`${existing.join("\0")}\0`);
 
-    // Set both `cwd: absSourceDir` AND `-C absSourceDir`. They're
-    // equivalent when production hits the non-git branch (where `-C`
-    // is processed before the `.` file arg), but in the git branch
-    // GNU tar reads paths from `-T -` in argv order — if `-C` lands
-    // AFTER `-T -`, tar starts statting paths against the inherited
-    // cwd before the chdir takes effect. Setting `cwd` on the spawn
-    // fixes the initial dir; the `-C` arg stays as a redundant safety
-    // net. Both must be absolute so a relative sourceDir doesn't
+    // `-C` MUST come before `-T -` in GNU tar. -T reads filenames from
+    // stdin, and tar processes positional opts in argv order: anything
+    // after -T - is treated as additional file specs, not options.
+    // Recent GNU tar (≥1.35 on Linux CI) makes this a hard error
+    // ("tar: -C '...' has no effect, exit 2") instead of the earlier
+    // silent ignore. macOS bsdtar accepts both orders. We also set
+    // `cwd: absSourceDir` on the spawn as a belt-and-suspenders for
+    // the same reason — paths in the stdin list are relative, so the
+    // initial cwd has to be right even before `-C` is parsed.
+    // Both args must be absolute so a relative sourceDir doesn't
     // double-apply (spawn cwd resolves `data/x` against process.cwd
     // → relative `-C data/x` would then chdir again).
-    tar = spawn("tar", ["-czf", "-", "--null", "-T", "-", "-C", absSourceDir], {
+    tar = spawn("tar", ["-czf", "-", "-C", absSourceDir, "--null", "-T", "-"], {
       cwd: absSourceDir,
       stdio: ["pipe", "pipe", "pipe"],
       // macOS tar adds AppleDouble `._<file>` metadata entries by default.
