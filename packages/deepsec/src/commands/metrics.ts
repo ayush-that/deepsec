@@ -163,6 +163,23 @@ export function formatPct(numerator: number, denominator: number): string {
   return `${Math.round((numerator / denominator) * 100)}%`;
 }
 
+/**
+ * Cache hit rate = cached input / total input.
+ *
+ * `inputTokens` is the *uncached* portion (Anthropic convention; the codex
+ * adapter normalizes to match), so total input is the sum of all three
+ * buckets. `cacheCreation` tokens are uncached too — they're paying full
+ * price to populate the cache for next time.
+ */
+export function formatCacheHitRate(tokens: {
+  input: number;
+  cacheRead: number;
+  cacheCreation: number;
+}): string {
+  const totalInput = tokens.input + tokens.cacheRead + tokens.cacheCreation;
+  return formatPct(tokens.cacheRead, totalInput);
+}
+
 // --- Table helpers ---
 
 function line(width: number): string {
@@ -376,7 +393,7 @@ export function metricsCommand(opts: { projectId?: string; minSeverity?: string 
 
     for (const m of allMetrics) {
       if (m.analysisCount === 0) continue;
-      const cacheHit = formatPct(m.tokens.cacheRead, m.tokens.cacheRead + m.tokens.input);
+      const cacheHit = formatCacheHitRate(m.tokens);
       const perAnalysis = m.cost / m.analysisCount;
       console.log(
         row(
@@ -397,10 +414,7 @@ export function metricsCommand(opts: { projectId?: string; minSeverity?: string 
 
     if (allMetrics.filter((m) => m.analysisCount > 0).length > 1) {
       console.log(midRow(costW));
-      const cacheHit = formatPct(
-        totals.tokens.cacheRead,
-        totals.tokens.cacheRead + totals.tokens.input,
-      );
+      const cacheHit = formatCacheHitRate(totals.tokens);
       const perAnalysis = totals.analysisCount > 0 ? totals.cost / totals.analysisCount : 0;
       console.log(
         row(
