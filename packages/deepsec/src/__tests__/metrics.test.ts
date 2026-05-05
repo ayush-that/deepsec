@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatCacheHitRate,
-  formatCost,
-  formatPct,
-  formatTokens,
-} from "../commands/metrics.js";
+import { formatCacheHitRate, formatCost, formatPct, formatTokens } from "../commands/metrics.js";
 
 describe("formatCost", () => {
   it("renders $0 exactly", () => {
@@ -58,27 +53,19 @@ describe("formatPct", () => {
 
 describe("formatCacheHitRate", () => {
   it("computes cacheRead / total input without double-counting", () => {
-    expect(
-      formatCacheHitRate({ input: 20, cacheRead: 80, cacheCreation: 0 }),
-    ).toBe("80%");
+    expect(formatCacheHitRate({ input: 20, cacheRead: 80, cacheCreation: 0 })).toBe("80%");
   });
 
   it("counts cacheCreation as uncached input in the denominator", () => {
     // 800 cached out of 1000 total input (100 uncached + 100 creation + 800 read) → 80%.
-    expect(
-      formatCacheHitRate({ input: 100, cacheRead: 800, cacheCreation: 100 }),
-    ).toBe("80%");
+    expect(formatCacheHitRate({ input: 100, cacheRead: 800, cacheCreation: 100 })).toBe("80%");
   });
 
   it("returns em-dash when there is no input", () => {
-    expect(
-      formatCacheHitRate({ input: 0, cacheRead: 0, cacheCreation: 0 }),
-    ).toBe("—");
+    expect(formatCacheHitRate({ input: 0, cacheRead: 0, cacheCreation: 0 })).toBe("—");
   });
 
   it("is 0% when nothing was read from cache", () => {
-    expect(
-      formatCacheHitRate({ input: 500, cacheRead: 0, cacheCreation: 0 }),
-    ).toBe("0%");
+    expect(formatCacheHitRate({ input: 500, cacheRead: 0, cacheCreation: 0 })).toBe("0%");
   });
 });
