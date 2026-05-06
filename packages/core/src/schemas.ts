@@ -162,12 +162,21 @@ export const runMetaSchema = z.object({
   completedAt: z.string().optional(),
   type: z.enum(["scan", "process", "revalidate"]),
   phase: z.enum(["running", "done", "error"]),
-  scannerConfig: z.object({ matcherSlugs: z.array(z.string()) }).optional(),
+  scannerConfig: z
+    .object({
+      matcherSlugs: z.array(z.string()),
+      mode: z.enum(["full", "files"]).optional(),
+      source: z.string().optional(),
+      fileCount: z.number().optional(),
+    })
+    .optional(),
   processorConfig: z
     .object({
       agentType: z.string(),
       model: z.string(),
       modelConfig: z.record(z.unknown()),
+      invocationMode: z.enum(["scan", "direct"]).optional(),
+      source: z.string().optional(),
     })
     .optional(),
   stats: z.object({

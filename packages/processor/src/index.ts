@@ -95,6 +95,17 @@ export async function process(params: {
   onlySlugs?: string[];
   /** Skip files whose candidate slugs are ALL in this set (files with any other slug still get processed) */
   skipSlugs?: string[];
+  /**
+   * Direct invocation mode. When set, the scanner-state filter
+   * (pending/error/stale) is bypassed and these exact files are always
+   * investigated — regardless of prior status. Used by `process --diff`
+   * and friends. Caller is expected to have run `scanFiles()` first so
+   * each path has a FileRecord on disk; missing records are skipped
+   * with a console warning.
+   */
+  filePaths?: string[];
+  /** Free-form origin label for direct invocations (e.g. "git-diff:origin/main"). */
+  source?: string;
   onProgress?: (progress: ProcessProgress) => void;
 }): Promise<{ runId: string; analysisCount: number; findingCount: number }> {
   const { projectId, agentType = "claude-agent-sdk", config = {}, reinvestigate = false } = params;
@@ -218,11 +229,18 @@ export async function process(params: {
     }
   } else {
     // Create new run
+    const directMode = params.filePaths !== undefined;
     const meta = createRunMeta({
       projectId,
       rootPath: effectiveRootPath,
       type: "process",
-      processorConfig: { agentType, model, modelConfig: config },
+      processorConfig: {
+        agentType,
+        model,
+        modelConfig: config,
+        invocationMode: directMode ? "direct" : "scan",
+        source: directMode ? params.source : undefined,
+      },
     });
     writeRunMeta(meta);
     runId = meta.runId;
@@ -239,7 +257,26 @@ export async function process(params: {
   const allRecords = loadAllFileRecords(projectId);
   let toProcess: FileRecord[];
 
-  if (typeof reinvestigate === "number") {
+  // Direct mode: caller passed an exact file list. Bypass the
+  // scanner-state filter, the noise sort, and reinvestigate logic — the
+  // user's list IS the work. Records are loaded by path; we expect
+  // `scanFiles()` to have run first so every path has a record on disk.
+  if (params.filePaths !== undefined) {
+    const wanted = new Set(params.filePaths.map((p) => p.replaceAll("\\", "/")));
+    const byPath = new Map(allRecords.map((r) => [r.filePath, r]));
+    const missing: string[] = [];
+    toProcess = [];
+    for (const p of wanted) {
+      const r = byPath.get(p);
+      if (r) toProcess.push(r);
+      else missing.push(p);
+    }
+    if (missing.length > 0) {
+      console.warn(
+        `[deepsec] process: ${missing.length} file(s) had no FileRecord and were skipped: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}`,
+      );
+    }
+  } else if (typeof reinvestigate === "number") {
     // Idempotent reinvestigate: `--reinvestigate <N>` is a *wave marker*.
     // The first run with a given N tags every productive analysis it
     // produces with `reinvestigateMarker = N`; re-running with the same N

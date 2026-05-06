@@ -1,0 +1,78 @@
+name: deepsec
+
+# Run deepsec on its own changes — eats our own dog food. The
+# `.deepsec/` workspace already has this repo registered as a project.
+# We run from inside it so the workspace's deepsec.config.ts (and its
+# custom matcher plugin) loads, and `git diff` runs against the real
+# codebase root one level up.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # We need the merge base so `git diff origin/<base>` resolves
+          # to the actual change set, not the empty intersection of two
+          # shallow histories.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Fork PRs don't get the secret; skip the AI step cleanly instead
+      # of letting the binary blow up later.
+      - name: Check for AI Gateway secret
+        id: check-secret
+        env:
+          KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "have_key=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::AI_GATEWAY_API_KEY not set — skipping deepsec review (likely a fork PR)."
+          else
+            echo "have_key=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: deepsec process --diff
+        if: steps.check-secret.outputs.have_key == 'true'
+        id: deepsec
+        working-directory: .deepsec
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+        run: |
+          pnpm deepsec process \
+            --diff origin/${{ github.event.pull_request.base.ref }} \
+            --comment-out comment.md
+
+      - name: Comment findings on PR
+        # Runs only when the deepsec step exited 1 (findings present)
+        # AND a comment was actually written. `hashFiles` returns ''
+        # when the path doesn't exist, so the second guard handles
+        # non-finding failures (timeouts, OOM, …).
+        if: failure() && steps.deepsec.outcome == 'failure' && hashFiles('.deepsec/comment.md') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('.deepsec/comment.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            })

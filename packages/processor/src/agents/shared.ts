@@ -81,6 +81,13 @@ export function buildInvestigatePrompt(params: {
 
   const fileList = batch
     .map((r) => {
+      // Direct-invocation runs (e.g. `process --diff`) can include files
+      // the scanner saw but didn't flag. Render those as a holistic-review
+      // hint so the agent doesn't waste turns asking "what's the
+      // candidate?" when there isn't one.
+      if (r.candidates.length === 0) {
+        return `- **${r.filePath}** (no scanner hits — full holistic review)`;
+      }
       const matchDetails = r.candidates
         .map((m) => {
           const lines = m.lineNumbers.join(", ");

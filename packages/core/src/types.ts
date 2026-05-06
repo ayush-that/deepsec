@@ -10,11 +10,39 @@ export interface RunMeta {
   phase: "running" | "done" | "error";
   scannerConfig?: {
     matcherSlugs: string[];
+    /**
+     * Scan mode. "full" (default, omitted on legacy runs) is the
+     * whole-repo glob-driven scan. "files" means the run was bounded to
+     * an explicit file list (e.g. `process --diff`); FileRecords were
+     * written for every listed file even when no matchers fired.
+     */
+    mode?: "full" | "files";
+    /**
+     * Where the file list came from. Free-form label like
+     * "git-diff:origin/main" or "files:cli". Only meaningful when
+     * mode === "files".
+     */
+    source?: string;
+    /** Number of files in the explicit list. Only set when mode === "files". */
+    fileCount?: number;
   };
   processorConfig?: {
     agentType: string;
     model: string;
     modelConfig: Record<string, unknown>;
+    /**
+     * "scan" (default, omitted on legacy runs) means process pulled work
+     * from the scanner's pending file queue. "direct" means the file
+     * list was passed in explicitly (e.g. `process --diff`) and the
+     * scanner-state filtering was bypassed.
+     */
+    invocationMode?: "scan" | "direct";
+    /**
+     * Origin label for direct invocations: "git-diff:origin/main",
+     * "files:cli", "files-from:-", etc. Only meaningful when
+     * invocationMode === "direct".
+     */
+    source?: string;
   };
   stats: {
     filesScanned?: number;
