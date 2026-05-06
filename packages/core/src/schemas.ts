@@ -153,6 +153,7 @@ export const fileRecordSchema = z.object({
     .optional(),
   status: z.enum(["pending", "processing", "analyzed", "error"]),
   lockedByRunId: z.string().optional(),
+  lockedAt: z.string().optional(),
 });
 
 export const runMetaSchema = z.object({

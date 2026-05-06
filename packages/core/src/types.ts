@@ -237,6 +237,21 @@ export interface FileRecord {
   // Status & locking
   status: FileStatus;
   lockedByRunId?: string;
+  /**
+   * ISO timestamp when `status` last transitioned to `processing` and
+   * `lockedByRunId` was set. Used by the work selector to decide when
+   * a `processing` record from another run is reclaimable: only when
+   * the lock is older than `STALE_LOCK_MS` AND the locking run's
+   * RunMeta is `done` / `error` / missing. Without this, two
+   * overlapping `process()` runs could both pick up the same record
+   * and clobber each other's findings on write.
+   *
+   * Optional for backward compatibility with records written before
+   * this field existed. Missing values are treated as "very old" so
+   * legacy locked records can still be reclaimed when their owning
+   * run is no longer alive.
+   */
+  lockedAt?: string;
 }
 
 // --- Project config ---

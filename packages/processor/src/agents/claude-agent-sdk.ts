@@ -32,6 +32,77 @@ import type {
  */
 const CLAUDE_CODE_EXECUTABLE = process.env.CLAUDE_CODE_EXECUTABLE;
 
+/**
+ * Variables the Claude Code CLI / spawned shell legitimately needs.
+ * Same defense as the codex allowlist: prompt-injection via repository
+ * content cannot ask the agent to `cat /proc/self/environ` and read
+ * GITHUB_TOKEN, AWS_*, etc. when none of those reach the spawn env.
+ *
+ * The Claude SDK's `query()` accepts an `env` option that REPLACES
+ * process.env in the spawned `claude` child. We construct a minimal
+ * environment from this allowlist plus the credentials Claude actually
+ * needs to authenticate.
+ */
+const CLAUDE_ENV_ALLOWLIST = new Set<string>([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TERM",
+  "TZ",
+  "LANG",
+  "LANGUAGE",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LC_MESSAGES",
+  "LC_COLLATE",
+  "LC_NUMERIC",
+  "LC_TIME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "PWD",
+  "NODE_PATH",
+  "NODE_OPTIONS",
+  "NPM_CONFIG_USERCONFIG",
+  "DEBUG_CLAUDE_AGENT_SDK",
+  "CLAUDE_CODE_ENTRYPOINT",
+  "CLAUDE_CODE_DEBUG_LOGS_DIR",
+]);
+
+/**
+ * Build the minimal env passed to the Claude Code child process.
+ * Allowlist + the credential routing the SDK was about to read off
+ * `process.env` itself. Anything else (CI tokens, cloud creds, custom
+ * vars) is dropped.
+ */
+function buildClaudeEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (typeof v !== "string") continue;
+    if (CLAUDE_ENV_ALLOWLIST.has(k) || k.startsWith("LC_")) {
+      env[k] = v;
+    }
+  }
+  // Forward only the credential routing pair the SDK needs to auth.
+  // ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL is the gateway pair;
+  // ANTHROPIC_API_KEY covers direct-Anthropic. CLAUDE_CODE_OAUTH_TOKEN
+  // is the subscription-mode token. Forwarding only these (rather
+  // than wholesale process.env) means the agent's Bash sees just
+  // these specific values — no GITHUB_TOKEN, AWS_*, etc.
+  for (const k of [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+  ]) {
+    const v = process.env[k];
+    if (typeof v === "string") env[k] = v;
+  }
+  return env;
+}
+
 async function runRefusalFollowUp(
   sessionId: string | undefined,
   model: string,
@@ -53,6 +124,7 @@ async function runRefusalFollowUp(
         thinking: { type: "adaptive" },
         effort: "low",
         ...(CLAUDE_CODE_EXECUTABLE ? { pathToClaudeCodeExecutable: CLAUDE_CODE_EXECUTABLE } : {}),
+        env: buildClaudeEnv(),
       },
     })) {
       const msg = message as Record<string, any>;
@@ -117,6 +189,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
             ...(CLAUDE_CODE_EXECUTABLE
               ? { pathToClaudeCodeExecutable: CLAUDE_CODE_EXECUTABLE }
               : {}),
+            env: buildClaudeEnv(),
           },
         })) {
           try {
@@ -305,6 +378,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
             ...(CLAUDE_CODE_EXECUTABLE
               ? { pathToClaudeCodeExecutable: CLAUDE_CODE_EXECUTABLE }
               : {}),
+            env: buildClaudeEnv(),
           },
         })) {
           try {

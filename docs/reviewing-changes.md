@@ -109,10 +109,10 @@ on: pull_request
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
-  review:
+  analyze:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -137,6 +137,28 @@ jobs:
             --comment-out comment.md
 
       - if: always() && hashFiles('comment.md') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepsec-comment
+          path: comment.md
+          retention-days: 1
+
+  comment:
+    needs: analyze
+    if: always() && needs.analyze.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - id: dl
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: deepsec-comment
+
+      - if: steps.dl.outcome == 'success'
         uses: actions/github-script@v7
         with:
           script: |
@@ -149,27 +171,54 @@ jobs:
             });
 ```
 
-How it works:
+### How it works
 
-- **`fetch-depth: 0`** — needed so `git diff origin/<base>` can resolve
-  against the merge base; the default shallow clone doesn't have it.
+- **Two-job split.** `analyze` runs PR-controlled code (the
+  user's `pnpm install`, their config, their source) with the AI
+  gateway secret in scope but **no write permissions on the repo**.
+  `comment` has `pull-requests: write` but never runs any PR code —
+  it consumes only the sanitized `comment.md` artifact. A malicious
+  PR can't combine "execute arbitrary code" with "write to the
+  repository" in a single privileged step.
+- **Same-repo-only gate.** `if: github.event.pull_request.head.repo.full_name == github.repository`
+  skips fork PRs entirely. Forks already don't receive repo secrets
+  under `pull_request`, so the deepsec step would just fail on
+  missing credentials anyway — this gate is purely a UX cleanup
+  (fork PRs show "skipped" instead of red ❌ from a doomed run).
+- **`fetch-depth: 0`** — needed so `git diff origin/<base>` can
+  resolve against the merge base; the default shallow clone doesn't
+  have it.
 - **`npm install -g @anthropic-ai/claude-code`** — the Claude Code CLI
   is what the SDK actually drives. Installing it globally + setting
   `CLAUDE_CODE_EXECUTABLE: claude` skips the SDK's bundled-binary
   resolution, which can fail on Linux under some package managers.
-- **`pnpm deepsec`** — swap for `npx -y deepsec` if you don't have a
-  workspace, or `npm exec deepsec` / `yarn deepsec` to match your
-  package manager.
-- **The `comment.md` guard** — `--comment-out` only writes the file
-  when findings exist, so `hashFiles('comment.md') != ''` is the test
-  for "we have something worth posting." `always()` ensures the step
-  runs even though the deepsec job exited 1.
+- **`pnpm deepsec`** — swap for `npx -y deepsec`, `npm exec deepsec`,
+  or `yarn deepsec` to match your package manager.
+- **`comment.md` is uploaded only when findings exist** —
+  `--comment-out` writes nothing on a green run, so the upload step's
+  `hashFiles` check skips and the `comment` job downloads no
+  artifact. That keeps the post-comment job a no-op when there's
+  nothing to say.
 
-For fork PRs the `secrets.AI_GATEWAY_API_KEY` won't be available; the
-deepsec step will error fast with "missing credential" and the comment
-step will be skipped (no comment.md was written). That's the right
-behavior — you don't want to run AI on untrusted fork code anyway, and
-forks can't post PR comments with the default token.
+### Threat model notes
+
+- **Don't grant `pull-requests: write` to a job that runs PR code.**
+  The two-job pattern above keeps PR code in the no-write `analyze`
+  job. If you're tempted to collapse them, remember that a PR can
+  add arbitrary code to its own `package.json` postinstall scripts
+  or to a project config file that the CLI loads — both run before
+  any of your own steps.
+- **Pin actions to full SHAs in production.** This example uses
+  major-version tags (`@v4`) for readability. For a hardened
+  deployment, swap each tag for the action's full commit SHA so a
+  compromised tag can't pivot into your secret-bearing job. See
+  [GitHub's hardening guide](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions).
+- **The AI gateway secret still flows through PR code.** Even with
+  the job split, `analyze` has the secret in env while running
+  PR-controlled `pnpm install`. The `author_association` gate is
+  what prevents that from being a vulnerability. If you want
+  defense-in-depth, run `analyze` only after a label is applied
+  (e.g. `if: contains(github.event.pull_request.labels.*.name, 'review-ok')`).
 
 ## Cost notes
 

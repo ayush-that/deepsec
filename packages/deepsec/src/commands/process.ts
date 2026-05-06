@@ -179,9 +179,27 @@ async function processStandardMode(opts: Parameters<typeof processCommand>[0]) {
   console.log(`${GREEN}Processing complete.${RESET} Run: ${BOLD}${result.runId}${RESET}`);
   console.log(`  Analyses: ${result.analysisCount}`);
   console.log(`  Findings: ${result.findingCount}`);
+  if (result.errorBatchCount > 0) {
+    console.log(`  ${RED}Errored batches: ${result.errorBatchCount}${RESET}`);
+  }
   console.log();
-  console.log(`Next:`);
-  console.log(`${DIM}pnpm deepsec report --project-id ${projectId}${RESET}`);
+
+  // Standard-mode parity with direct-mode: a run that crashed agent
+  // batches isn't a clean review. Print the runtime hint first so
+  // operators see it on success runs, then fail-loud when applicable.
+  if (result.errorBatchCount === 0) {
+    console.log(`Next:`);
+    console.log(`${DIM}pnpm deepsec report --project-id ${projectId}${RESET}`);
+    return;
+  }
+
+  console.log(
+    `${RED}${result.errorBatchCount} batch(es) errored — exiting 1 (agent failure, not a clean review).${RESET}`,
+  );
+  console.log(
+    `${DIM}Files in those batches were marked status=error and will be retried on the next run.${RESET}`,
+  );
+  process.exit(1);
 }
 
 /**

@@ -264,6 +264,46 @@ export async function process(params: {
   }
   const agent = maybeAgent;
 
+  // Reclaim policy for `processing` records held by other runs. The
+  // race we're protecting against: two `process()` invocations against
+  // the same project at the same time. Without this check, the second
+  // run grabs files the first run is mid-investigation on, both write
+  // back, and findings/history get clobbered.
+  //
+  // A lock is reclaimable when EITHER:
+  //   1. The owning run's RunMeta says it's done/error/missing — the
+  //      lock won't be released by the original owner, ever.
+  //   2. The lock is older than STALE_LOCK_MS and the owning run's
+  //      RunMeta phase is still "running" (likely a hard crash; the
+  //      heartbeat would update lockedAt during normal progress).
+  //
+  // STALE_LOCK_MS is generous (1h) because individual investigations
+  // can legitimately take 20–40 minutes on big repos with max
+  // thinking. False reclaims are catastrophic; false rejections only
+  // cost a retry on the next run.
+  const STALE_LOCK_MS = 60 * 60 * 1000;
+  const isReclaimableLock = (r: FileRecord): boolean => {
+    if (!r.lockedByRunId) return true;
+    // Cross-check the owning run's status. A done/error/missing run's
+    // lock is always safe to reclaim — nobody is going to flip the
+    // record back to "analyzed".
+    let ownerPhase: "running" | "done" | "error" | undefined;
+    try {
+      ownerPhase = readRunMeta(projectId, r.lockedByRunId).phase;
+    } catch {
+      // Missing/corrupt run-meta — owning run is gone, reclaim safely.
+      return true;
+    }
+    if (ownerPhase === "done" || ownerPhase === "error") return true;
+    // Owner reports running — only reclaim after a stale-lock timeout
+    // (hard crashes leave phase=running forever). Records written
+    // before lockedAt existed have no timestamp; treat those as old
+    // enough to reclaim so we can recover legacy locked state.
+    if (!r.lockedAt) return true;
+    const ageMs = Date.now() - new Date(r.lockedAt).getTime();
+    return ageMs >= STALE_LOCK_MS;
+  };
+
   // Load file records and pick which to process
   const allRecords = loadAllFileRecords(projectId);
   let toProcess: FileRecord[];
@@ -312,8 +352,12 @@ export async function process(params: {
       (r) =>
         r.status === "pending" ||
         r.status === "error" ||
-        // Unlock stale locks from crashed runs
-        (r.status === "processing" && r.lockedByRunId !== runId),
+        // Reclaim a `processing` record from another run only when the
+        // owning lock is genuinely abandoned. The previous version
+        // reclaimed unconditionally, which let two concurrent runs
+        // both pick up the same file and clobber each other on
+        // write. See `isReclaimableLock` for the exact criteria.
+        (r.status === "processing" && r.lockedByRunId !== runId && isReclaimableLock(r)),
     );
   }
 
@@ -379,9 +423,11 @@ export async function process(params: {
   }
 
   // Lock files for this run
+  const lockedAt = new Date().toISOString();
   for (const record of toProcess) {
     record.status = "processing";
     record.lockedByRunId = runId;
+    record.lockedAt = lockedAt;
     writeFileRecord(record);
   }
 
@@ -487,6 +533,7 @@ export async function process(params: {
         });
         record.status = "analyzed";
         record.lockedByRunId = undefined;
+        record.lockedAt = undefined;
         try {
           enrichFileRecord(record, effectiveRootPath);
         } catch (e) {
@@ -508,6 +555,7 @@ export async function process(params: {
         if (!results.some((r) => r.filePath === record.filePath)) {
           record.status = "error";
           record.lockedByRunId = undefined;
+          record.lockedAt = undefined;
           writeFileRecord(record);
         }
       }
@@ -527,6 +575,7 @@ export async function process(params: {
       for (const record of batch) {
         record.status = "error";
         record.lockedByRunId = undefined;
+        record.lockedAt = undefined;
         writeFileRecord(record);
       }
       emitProgress({
