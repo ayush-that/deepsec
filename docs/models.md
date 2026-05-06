@@ -4,8 +4,8 @@ deepsec talks to LLMs through two interchangeable backends:
 
 | Backend                     | Default model         | Used by                      |
 |-----------------------------|-----------------------|------------------------------|
-| `claude-agent-sdk` (default) | `claude-opus-4-7`     | `process`, `revalidate`      |
-| `codex`                     | `gpt-5.5`             | `process`, `revalidate`      |
+| `codex` (default)           | `gpt-5.5`             | `process`, `revalidate`      |
+| `claude-agent-sdk`          | `claude-opus-4-7`     | `process`, `revalidate`      |
 | `claude-agent-sdk` (triage)  | `claude-sonnet-4-6`   | `triage` (Claude-only)       |
 
 Both backends route through [Vercel AI Gateway](https://vercel.com/ai-gateway)
@@ -16,11 +16,11 @@ Anthropic or OpenAI directly, point `ANTHROPIC_BASE_URL` /
 ## CLI selection
 
 ```bash
-# Claude (default backend), default model:
+# Codex (default backend), default model:
 pnpm deepsec process --project-id my-app
 
 # Claude with a specific model:
-pnpm deepsec process --project-id my-app --model claude-sonnet-4-6
+pnpm deepsec process --project-id my-app --agent claude --model claude-sonnet-4-6
 
 # Codex backend, default model:
 pnpm deepsec process --project-id my-app --agent codex

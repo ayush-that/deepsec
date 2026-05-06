@@ -132,7 +132,7 @@ program
   .option("--run-id <id>", "Resume a specific processing run")
   .option(
     "--agent <type>",
-    "Agent plugin type: claude-agent-sdk or codex (default: defaultAgent in deepsec.config.ts, else claude-agent-sdk)",
+    "Agent plugin type: codex, claude, or claude-agent-sdk (default: defaultAgent in deepsec.config.ts, else codex)",
   )
   .option(
     "--model <model>",
@@ -192,7 +192,7 @@ program
   .option("--run-id <id>", "Resume a specific revalidation run")
   .option(
     "--agent <type>",
-    "Agent plugin type: claude-agent-sdk or codex (default: defaultAgent in deepsec.config.ts, else claude-agent-sdk)",
+    "Agent plugin type: codex, claude, or claude-agent-sdk (default: defaultAgent in deepsec.config.ts, else codex)",
   )
   .option(
     "--model <model>",

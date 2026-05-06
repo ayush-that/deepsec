@@ -59,8 +59,8 @@ AI_GATEWAY_API_KEY=vck_…
 deepsec expands whichever credential it finds (the API key first, the
 OIDC token as fallback) at startup into the four vars the agent SDKs
 read (`ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_BASE_URL`,
-`OPENAI_BASE_URL`), so a single credential covers both Claude
-(`--agent claude-agent-sdk`, the default) and Codex (`--agent codex`).
+`OPENAI_BASE_URL`), so a single credential covers both Codex
+(`--agent codex`, the default) and Claude (`--agent claude`).
 Any of those four vars you set explicitly takes precedence over the
 expansion — useful for mixing direct Anthropic with gateway-routed
 OpenAI, etc.
