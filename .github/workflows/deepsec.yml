@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # need history for `git diff origin/<base>`
+          fetch-depth: 0 # need history for `git diff origin/<base>`
 
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -27,7 +27,7 @@ jobs:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           CLAUDE_CODE_EXECUTABLE: claude
         run: |
-          pnpm deepsec process \
+          pnpm deepsec process --agent codex \
             --diff origin/${{ github.event.pull_request.base.ref }} \
             --comment-out comment.md
 
