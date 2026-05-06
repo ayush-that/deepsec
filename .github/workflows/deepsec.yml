@@ -45,9 +45,25 @@ jobs:
       # path entirely.
       - name: Install Claude Code (matches SDK's bundled version)
         id: claude-code
+        # We resolve from packages/deepsec/ because the SDK is a direct
+        # dep there (not at the repo root), and `node -p
+        # "require(...sdk/package.json)"` doesn't work because the SDK
+        # blocks ./package.json in its `exports` field. require.resolve()
+        # of the entry point + a sibling fs.readFileSync sidesteps both.
+        # node's resolver searches relative to process.cwd() under -e, so
+        # we cd into the package first.
         run: |
-          # Match the version pinned in the SDK package metadata.
-          SDK_VERSION=$(node -p "require('@anthropic-ai/claude-agent-sdk/package.json').claudeCodeVersion")
+          SDK_VERSION=$(cd packages/deepsec && node -e "
+          const path = require('path');
+          const fs = require('fs');
+          const sdk = require.resolve('@anthropic-ai/claude-agent-sdk');
+          const pkg = JSON.parse(fs.readFileSync(path.join(path.dirname(sdk), 'package.json'), 'utf8'));
+          process.stdout.write(pkg.claudeCodeVersion);
+          ")
+          if [ -z "$SDK_VERSION" ]; then
+            echo "::error::Could not resolve claudeCodeVersion from @anthropic-ai/claude-agent-sdk"
+            exit 1
+          fi
           echo "Installing @anthropic-ai/claude-code@${SDK_VERSION}"
           npm install -g "@anthropic-ai/claude-code@${SDK_VERSION}"
           BIN=$(which claude)
