@@ -35,6 +35,7 @@ export const findingSchema = z.object({
     })
     .optional(),
   revalidation: revalidationSchema.optional(),
+  producedByRunId: z.string().optional(),
 });
 
 export const refusalReportSchema = z.object({

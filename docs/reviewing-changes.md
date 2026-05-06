@@ -81,15 +81,24 @@ somewhere to land.
 | `≠1` | Runtime error (bad input, missing credentials, …)|
 
 This makes direct mode a drop-in CI gate: the job fails when the agent
-finds something. Pre-existing findings on unrelated files are not
-counted — only findings from the current run.
+finds something. **Net-new findings only** count toward the exit code —
+re-running on a file with existing findings doesn't fail the build
+unless something new is surfaced. Pre-existing findings (from a prior
+full scan, or earlier PR review runs) on touched files are intentionally
+excluded so the gate matches the change-scoped review model.
 
 ## PR comments
 
-`--comment-out <path>` writes a markdown body summarizing the findings
-from the current run. The file is only written when there are findings,
-so a green run leaves nothing on disk and your "post comment" step can
-short-circuit on `if: hashFiles('comment.md') != ''`.
+`--comment-out <path>` writes a markdown body summarizing the **net-new
+findings** from this run — same scope as the exit-code gate. Findings
+already on touched files (from earlier full scans or prior PR reviews)
+aren't re-surfaced. Descriptions and recommendations are truncated
+(600 / 400 chars) so a multi-finding PR doesn't blow past GitHub's
+65 KiB comment limit; the full text stays in `data/<id>/files/`.
+
+The file is only written when there are findings, so a green run leaves
+nothing on disk and your "post comment" step can short-circuit on
+`if: hashFiles('comment.md') != ''`.
 
 This is the workflow we use to review our own PRs — copy it as-is:
 

@@ -458,7 +458,13 @@ export async function process(params: {
         const sig = (slug: string | undefined, title: string | undefined) =>
           `${slug ?? ""}::${(title ?? "").trim().toLowerCase()}`;
         const existing = new Set((record.findings ?? []).map((f) => sig(f.vulnSlug, f.title)));
-        const newFindings = res.findings.filter((f) => !existing.has(sig(f.vulnSlug, f.title)));
+        const newFindings = res.findings
+          .filter((f) => !existing.has(sig(f.vulnSlug, f.title)))
+          // Stamp the originating run so PR comments and post-run
+          // tooling can filter to net-new findings only. Findings from
+          // earlier runs keep their (older) producedByRunId — or
+          // undefined for findings written before this field existed.
+          .map((f) => ({ ...f, producedByRunId: runId }));
         record.findings = [...(record.findings ?? []), ...newFindings];
         const findingsForHistoryCount = newFindings.length;
 
@@ -491,7 +497,10 @@ export async function process(params: {
         writeFileRecord(record);
 
         totalAnalyses++;
-        totalFindings += res.findings.length;
+        // Count net-new only — re-runs of analyzed files that produce
+        // duplicates of existing findings shouldn't inflate the run
+        // total (and shouldn't fail the CLI exit gate in direct mode).
+        totalFindings += newFindings.length;
       }
 
       // Mark any files not in results as error

@@ -33,7 +33,7 @@ describe("renderPrComment()", () => {
     expect(md).toBeNull();
   });
 
-  it("renders only findings from the specified run", () => {
+  it("renders only net-new findings from the specified run", () => {
     const { projectId } = setupProject();
 
     writeRunMeta({
@@ -62,15 +62,27 @@ describe("renderPrComment()", () => {
           lineNumbers: [12],
           recommendation: "Use parameterized queries.",
           confidence: "high",
+          producedByRunId: "r1", // net-new in this run
         },
         {
           severity: "LOW",
           vulnSlug: "old",
           title: "Pre-existing finding",
-          description: "Found in an earlier run.",
+          description: "Carried over from an earlier run.",
           lineNumbers: [99],
           recommendation: "n/a",
           confidence: "low",
+          producedByRunId: "r-old", // attributable to a prior run
+        },
+        {
+          severity: "MEDIUM",
+          vulnSlug: "legacy",
+          title: "Legacy finding without producedByRunId",
+          description: "Predates the producedByRunId field.",
+          lineNumbers: [42],
+          recommendation: "n/a",
+          confidence: "medium",
+          // producedByRunId intentionally omitted — must not appear.
         },
       ],
       analysisHistory: [
@@ -87,7 +99,7 @@ describe("renderPrComment()", () => {
       status: "analyzed",
     });
 
-    // A second file investigated in a DIFFERENT run — should not appear.
+    // A different file with a finding from another run — must not leak in.
     writeFileRecord({
       filePath: "src/other.ts",
       projectId,
@@ -104,6 +116,7 @@ describe("renderPrComment()", () => {
           lineNumbers: [1],
           recommendation: "irrelevant",
           confidence: "high",
+          producedByRunId: "r-old",
         },
       ],
       analysisHistory: [
@@ -122,11 +135,12 @@ describe("renderPrComment()", () => {
 
     const md = renderPrComment({ projectId, runId: "r1", source: "git-diff:HEAD~1" });
     expect(md).not.toBeNull();
-    expect(md!).toContain("deepsec found");
+    expect(md!).toContain("deepsec found 1 finding");
     expect(md!).toContain("src/a.ts:L12");
     expect(md!).toContain("Concatenated query");
-    expect(md!).toContain("Pre-existing finding"); // same file, ran in r1
-    // The finding from src/other.ts (different run) must not leak in.
+    // Pre-existing findings from prior runs (or with no run id) are excluded.
+    expect(md!).not.toContain("Pre-existing finding");
+    expect(md!).not.toContain("Legacy finding without producedByRunId");
     expect(md!).not.toContain("Stale finding from older run");
     expect(md!).toContain("git-diff:HEAD~1");
   });

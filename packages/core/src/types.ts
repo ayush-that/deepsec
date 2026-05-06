@@ -152,6 +152,16 @@ export interface Finding {
   confidence: Confidence;
   triage?: Triage;
   revalidation?: Revalidation;
+  /**
+   * The run that first surfaced this finding (the one that appended it
+   * to `FileRecord.findings`). Set once at append time and never updated
+   * — re-runs that re-report the same signature get deduped, so this
+   * stays bound to the original discovery.
+   *
+   * Optional for backward compatibility with findings written before
+   * this field existed.
+   */
+  producedByRunId?: string;
 }
 
 // --- Ownership oracle types ---

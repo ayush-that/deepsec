@@ -24,14 +24,19 @@ const SEVERITY_BADGE: Record<Severity, string> = {
 };
 
 /**
- * Render a PR-comment-shaped markdown string for findings produced by a
- * specific `process` run. Loads the project's FileRecords and walks each
- * file's `analysisHistory` to identify which findings landed in this run
- * — only those are included so a comment never re-surfaces stale issues
- * from an earlier scan.
+ * Render a PR-comment-shaped markdown string for the **net-new**
+ * findings produced by a specific `process` run. Pre-existing findings
+ * on touched files (carried over from prior runs) are intentionally
+ * excluded — a PR comment should reflect what this change introduced,
+ * not surface old baseline noise.
  *
- * Returns `null` when the run produced no findings; the caller can skip
- * commenting entirely on green runs.
+ * Filtering is by `Finding.producedByRunId === runId` (stamped by the
+ * processor when each new finding is appended). Findings written
+ * before this field existed have `producedByRunId === undefined` and
+ * are always excluded from PR comments.
+ *
+ * Returns `null` when the run produced no net-new findings; the
+ * caller can skip commenting entirely on green runs.
  */
 export function renderPrComment(params: {
   projectId: string;
@@ -48,10 +53,10 @@ export function renderPrComment(params: {
   }> = [];
 
   for (const file of records) {
-    const ranInThisRun = (file.analysisHistory ?? []).some((h) => h.runId === runId);
-    if (!ranInThisRun) continue;
     for (const f of file.findings ?? []) {
-      findingsForRun.push({ file, finding: f });
+      if (f.producedByRunId === runId) {
+        findingsForRun.push({ file, finding: f });
+      }
     }
   }
 
