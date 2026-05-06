@@ -293,6 +293,21 @@ async function processDirectMode(opts: Parameters<typeof processCommand>[0]) {
   console.log(`${GREEN}Processing complete.${RESET} Run: ${BOLD}${result.runId}${RESET}`);
   console.log(`  Analyses: ${result.analysisCount}`);
   console.log(`  Findings: ${result.findingCount}`);
+  if (result.errorBatchCount > 0) {
+    console.log(`  ${RED}Errored batches: ${result.errorBatchCount}${RESET}`);
+  }
+
+  // Hard-fail when any batch threw — that means the agent itself
+  // failed to run (missing binary, auth error, etc.) on at least one
+  // batch. A "clean run with 0 findings" is a green CI signal; we
+  // can't let a silent agent crash mascarade as that.
+  if (result.errorBatchCount > 0) {
+    console.log();
+    console.log(
+      `${RED}${result.errorBatchCount} batch(es) errored — exiting 1 (agent failure, not a clean review).${RESET}`,
+    );
+    process.exit(1);
+  }
 
   // Optionally write a PR-comment-shaped markdown for the workflow to
   // pass to github-script.

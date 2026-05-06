@@ -731,6 +731,21 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
     // follow-up since that uses resumeThread which reads the session DB.
     cleanupCodexHome(invocation.codexHome);
 
+    // Silent-fail: codex exited clean but did no work (0 output tokens,
+    // empty resultText). Without this throw the empty output falls
+    // through and files get marked "analyzed" with no findings, masking
+    // the actual failure (rate-limit, gateway error, missing binary).
+    // The forensic stderr is included in the error message.
+    if (!resultText) {
+      const stderrSuffix = sdkMeta.codexStderr
+        ? ` Stderr tail: ${sdkMeta.codexStderr.slice(0, 800)}`
+        : "";
+      throw new Error(
+        `Codex SDK produced no result after ${MAX_ATTEMPTS} attempt(s). ` +
+          `Last error: ${lastError || "(none captured)"}.${stderrSuffix}`,
+      );
+    }
+
     return {
       results: parsed,
       meta: {
@@ -913,6 +928,16 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
     };
 
     cleanupCodexHome(invocation.codexHome);
+
+    if (!resultText) {
+      const stderrSuffix = sdkMeta.codexStderr
+        ? ` Stderr tail: ${sdkMeta.codexStderr.slice(0, 800)}`
+        : "";
+      throw new Error(
+        `Codex SDK produced no revalidation result after ${MAX_ATTEMPTS} attempt(s). ` +
+          `Last error: ${lastError || "(none captured)"}.${stderrSuffix}`,
+      );
+    }
 
     return {
       verdicts,

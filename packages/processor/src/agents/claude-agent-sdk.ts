@@ -21,6 +21,17 @@ import type {
   RevalidateParams,
 } from "./types.js";
 
+/**
+ * Optional path to the Claude Code native binary. The SDK normally
+ * resolves this from its bundled platform-specific optional
+ * dependencies, but pnpm sometimes ships incomplete content for
+ * platform variants it didn't fetch (the Linux-x64-musl shell exists
+ * but its `claude` binary is absent). Setting this env var lets CI
+ * point at a separately-installed `@anthropic-ai/claude-code` and
+ * sidestep the resolution path entirely.
+ */
+const CLAUDE_CODE_EXECUTABLE = process.env.CLAUDE_CODE_EXECUTABLE;
+
 async function runRefusalFollowUp(
   sessionId: string | undefined,
   model: string,
@@ -41,6 +52,7 @@ async function runRefusalFollowUp(
         resume: sessionId,
         thinking: { type: "adaptive" },
         effort: "low",
+        ...(CLAUDE_CODE_EXECUTABLE ? { pathToClaudeCodeExecutable: CLAUDE_CODE_EXECUTABLE } : {}),
       },
     })) {
       const msg = message as Record<string, any>;
@@ -102,6 +114,9 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
             model,
             thinking: { type: "adaptive" },
             effort: "max",
+            ...(CLAUDE_CODE_EXECUTABLE
+              ? { pathToClaudeCodeExecutable: CLAUDE_CODE_EXECUTABLE }
+              : {}),
           },
         })) {
           try {
@@ -219,6 +234,18 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
       message: `Investigation complete (${(durationMs / 1000).toFixed(1)}s, ${turnCount} turns, ${toolUseCount} tool calls${costStr}${tokensStr}${refusal?.refused ? " ⚠️  refusal" : ""})`,
     };
 
+    // Hard-fail when the SDK never produced a result. Without this throw
+    // the empty resultText falls through to `parseInvestigateResults` →
+    // `[{filePath, findings: []}, …]`, which the processor accepts as a
+    // clean "ran fine, found nothing" run. That silently masks fatal
+    // errors like "claude binary not found" in CI.
+    if (!resultText) {
+      throw new Error(
+        `Claude Agent SDK produced no result after ${MAX_ATTEMPTS} attempt(s). ` +
+          `Last error: ${lastError || "(none captured)"}.`,
+      );
+    }
+
     return {
       results: parseInvestigateResults(resultText, batch),
       meta: {
@@ -275,6 +302,9 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
             model,
             thinking: { type: "adaptive" },
             effort: "max",
+            ...(CLAUDE_CODE_EXECUTABLE
+              ? { pathToClaudeCodeExecutable: CLAUDE_CODE_EXECUTABLE }
+              : {}),
           },
         })) {
           try {
@@ -347,6 +377,13 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
       type: "complete",
       message: `Revalidation complete (${(durationMs / 1000).toFixed(1)}s, ${turnCount} turns${costStr}, ${verdicts.length} verdicts${refusal?.refused ? " ⚠️  refusal" : ""})`,
     };
+
+    if (!resultText) {
+      throw new Error(
+        `Claude Agent SDK produced no revalidation result after ${MAX_ATTEMPTS} attempt(s). ` +
+          `Last error: ${lastError || "(none captured)"}.`,
+      );
+    }
 
     return {
       verdicts,

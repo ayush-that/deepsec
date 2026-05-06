@@ -107,7 +107,18 @@ export async function process(params: {
   /** Free-form origin label for direct invocations (e.g. "git-diff:origin/main"). */
   source?: string;
   onProgress?: (progress: ProcessProgress) => void;
-}): Promise<{ runId: string; analysisCount: number; findingCount: number }> {
+}): Promise<{
+  runId: string;
+  analysisCount: number;
+  findingCount: number;
+  /**
+   * Batches whose agent threw — i.e. produced no usable result text after
+   * retries. Distinct from a clean run with zero findings: a non-zero
+   * count means the agent failed to run (missing binary, gateway error,
+   * crashed CLI). CI gates on this so a silent fail doesn't pass.
+   */
+  errorBatchCount: number;
+}> {
   const { projectId, agentType = "claude-agent-sdk", config = {}, reinvestigate = false } = params;
   // We deliberately don't default `promptTemplate` to DEFAULT_PROMPT_TEMPLATE
   // here — when the caller doesn't pass one, we use the modular assembler
@@ -225,7 +236,7 @@ export async function process(params: {
         type: "all_complete",
         message: `Run ${runId} already completed`,
       });
-      return { runId, analysisCount: 0, findingCount: 0 };
+      return { runId, analysisCount: 0, findingCount: 0, errorBatchCount: 0 };
     }
   } else {
     // Create new run
@@ -354,7 +365,7 @@ export async function process(params: {
       message: "No files to process",
     });
     completeRun(projectId, runId, "done", { filesProcessed: 0 });
-    return { runId, analysisCount: 0, findingCount: 0 };
+    return { runId, analysisCount: 0, findingCount: 0, errorBatchCount: 0 };
   }
 
   // Apply path filter
@@ -382,6 +393,7 @@ export async function process(params: {
   let totalOutputTokens = 0;
   let totalDurationMs = 0;
   let batchesCompleted = 0;
+  let batchesFailed = 0;
   let batchesInFlight = 0;
   const concurrency = params.concurrency ?? defaultConcurrency();
 
@@ -502,6 +514,7 @@ export async function process(params: {
     } catch (err) {
       batchesInFlight--;
       batchesCompleted++;
+      batchesFailed++;
       for (const record of batch) {
         record.status = "error";
         record.lockedByRunId = undefined;
@@ -545,10 +558,15 @@ export async function process(params: {
 
   emitProgress({
     type: "all_complete",
-    message: `Processing complete: ${totalAnalyses} analyses, ${totalFindings} findings`,
+    message: `Processing complete: ${totalAnalyses} analyses, ${totalFindings} findings${batchesFailed > 0 ? `, ${batchesFailed} batch(es) failed` : ""}`,
   });
 
-  return { runId, analysisCount: totalAnalyses, findingCount: totalFindings };
+  return {
+    runId,
+    analysisCount: totalAnalyses,
+    findingCount: totalFindings,
+    errorBatchCount: batchesFailed,
+  };
 }
 
 // --- Revalidation ---

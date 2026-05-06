@@ -36,6 +36,24 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The Claude Agent SDK ships platform-specific binaries as optional
+      # deps. pnpm sometimes leaves the Linux variants partially populated
+      # on the wrong libc (the wrapper exists but `claude` doesn't), so
+      # the SDK errors with "native binary not found" the first time it
+      # tries to spawn. Installing claude-code globally and pointing the
+      # SDK at it via CLAUDE_CODE_EXECUTABLE bypasses the resolution
+      # path entirely.
+      - name: Install Claude Code (matches SDK's bundled version)
+        id: claude-code
+        run: |
+          # Match the version pinned in the SDK package metadata.
+          SDK_VERSION=$(node -p "require('@anthropic-ai/claude-agent-sdk/package.json').claudeCodeVersion")
+          echo "Installing @anthropic-ai/claude-code@${SDK_VERSION}"
+          npm install -g "@anthropic-ai/claude-code@${SDK_VERSION}"
+          BIN=$(which claude)
+          echo "claude bin: $BIN"
+          echo "bin=$BIN" >> "$GITHUB_OUTPUT"
+
       # Fork PRs don't get the secret; skip the AI step cleanly instead
       # of letting the binary blow up later.
       - name: Check for AI Gateway secret
@@ -55,6 +73,7 @@ jobs:
         id: deepsec
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          CLAUDE_CODE_EXECUTABLE: ${{ steps.claude-code.outputs.bin }}
         run: |
           pnpm deepsec process \
             --diff origin/${{ github.event.pull_request.base.ref }} \
