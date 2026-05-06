@@ -1,10 +1,12 @@
 name: deepsec
 
-# Run deepsec on its own changes — eats our own dog food. The
-# `.deepsec/` workspace already has this repo registered as a project.
-# We run from inside it so the workspace's deepsec.config.ts (and its
-# custom matcher plugin) loads, and `git diff` runs against the real
-# codebase root one level up.
+# Run deepsec on its own changes — eats our own dog food. We run from
+# the repo root using the built-in matcher set (no project config
+# needed). The CLI auto-creates a `data/<id>/` mirror on first run.
+#
+# The local `.deepsec/` workspace that maintainers use isn't tracked
+# (`.deepsec` is gitignored), so we don't try to load its config or
+# custom matchers here.
 
 on:
   pull_request:
@@ -51,7 +53,6 @@ jobs:
       - name: deepsec process --diff
         if: steps.check-secret.outputs.have_key == 'true'
         id: deepsec
-        working-directory: .deepsec
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
         run: |
@@ -64,12 +65,12 @@ jobs:
         # AND a comment was actually written. `hashFiles` returns ''
         # when the path doesn't exist, so the second guard handles
         # non-finding failures (timeouts, OOM, …).
-        if: failure() && steps.deepsec.outcome == 'failure' && hashFiles('.deepsec/comment.md') != ''
+        if: failure() && steps.deepsec.outcome == 'failure' && hashFiles('comment.md') != ''
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync('.deepsec/comment.md', 'utf8');
+            const body = fs.readFileSync('comment.md', 'utf8');
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
