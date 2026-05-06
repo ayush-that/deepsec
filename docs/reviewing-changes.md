@@ -91,14 +91,12 @@ from the current run. The file is only written when there are findings,
 so a green run leaves nothing on disk and your "post comment" step can
 short-circuit on `if: hashFiles('comment.md') != ''`.
 
-A minimal GitHub Actions workflow that runs `deepsec` on PRs and
-comments findings back:
+This is the workflow we use to review our own PRs — copy it as-is:
 
 ```yaml
-name: deepsec PR review
+name: deepsec
 
-on:
-  pull_request:
+on: pull_request
 
 permissions:
   contents: read
@@ -111,38 +109,58 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # we need the merge base for `git diff origin/main`
+          fetch-depth: 0  # need history for `git diff origin/<base>`
 
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
+        with: { node-version: 24, cache: pnpm }
 
-      - run: |
-          npx deepsec process \
-            --diff origin/${{ github.event.pull_request.base.ref }} \
-            --comment-out comment.md
+      - run: pnpm install --frozen-lockfile
+      - run: npm install -g @anthropic-ai/claude-code
+
+      - id: deepsec
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          CLAUDE_CODE_EXECUTABLE: claude
+        run: |
+          pnpm deepsec process \
+            --diff origin/${{ github.event.pull_request.base.ref }} \
+            --comment-out comment.md
 
-      - name: Comment on PR
-        if: failure() && hashFiles('comment.md') != ''
+      - if: always() && hashFiles('comment.md') != ''
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync('comment.md', 'utf8');
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body
-            })
+              body: fs.readFileSync('comment.md', 'utf8'),
+            });
 ```
 
-`if: failure()` runs the comment step exactly when `deepsec process`
-exited 1 (findings present). The `hashFiles` guard handles the rare case
-where the job failed for a non-finding reason and no comment was
-written.
+How it works:
+
+- **`fetch-depth: 0`** — needed so `git diff origin/<base>` can resolve
+  against the merge base; the default shallow clone doesn't have it.
+- **`npm install -g @anthropic-ai/claude-code`** — the Claude Code CLI
+  is what the SDK actually drives. Installing it globally + setting
+  `CLAUDE_CODE_EXECUTABLE: claude` skips the SDK's bundled-binary
+  resolution, which can fail on Linux under some package managers.
+- **`pnpm deepsec`** — swap for `npx -y deepsec` if you don't have a
+  workspace, or `npm exec deepsec` / `yarn deepsec` to match your
+  package manager.
+- **The `comment.md` guard** — `--comment-out` only writes the file
+  when findings exist, so `hashFiles('comment.md') != ''` is the test
+  for "we have something worth posting." `always()` ensures the step
+  runs even though the deepsec job exited 1.
+
+For fork PRs the `secrets.AI_GATEWAY_API_KEY` won't be available; the
+deepsec step will error fast with "missing credential" and the comment
+step will be skipped (no comment.md was written). That's the right
+behavior — you don't want to run AI on untrusted fork code anyway, and
+forks can't post PR comments with the default token.
 
 ## Cost notes
 

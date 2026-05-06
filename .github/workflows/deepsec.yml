@@ -1,15 +1,6 @@
 name: deepsec
 
-# Run deepsec on its own changes — eats our own dog food. We run from
-# the repo root using the built-in matcher set (no project config
-# needed). The CLI auto-creates a `data/<id>/` mirror on first run.
-#
-# The local `.deepsec/` workspace that maintainers use isn't tracked
-# (`.deepsec` is gitignored), so we don't try to load its config or
-# custom matchers here.
-
-on:
-  pull_request:
+on: pull_request
 
 permissions:
   contents: read
@@ -20,95 +11,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@v4
         with:
-          # We need the merge base so `git diff origin/<base>` resolves
-          # to the actual change set, not the empty intersection of two
-          # shallow histories.
-          fetch-depth: 0
+          fetch-depth: 0  # need history for `git diff origin/<base>`
 
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: '24'
-          cache: pnpm
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
 
       - run: pnpm install --frozen-lockfile
+      - run: npm install -g @anthropic-ai/claude-code
 
-      # The Claude Agent SDK ships platform-specific binaries as optional
-      # deps. pnpm sometimes leaves the Linux variants partially populated
-      # on the wrong libc (the wrapper exists but `claude` doesn't), so
-      # the SDK errors with "native binary not found" the first time it
-      # tries to spawn. Installing claude-code globally and pointing the
-      # SDK at it via CLAUDE_CODE_EXECUTABLE bypasses the resolution
-      # path entirely.
-      - name: Install Claude Code (matches SDK's bundled version)
-        id: claude-code
-        # We resolve from packages/deepsec/ because the SDK is a direct
-        # dep there (not at the repo root), and `node -p
-        # "require(...sdk/package.json)"` doesn't work because the SDK
-        # blocks ./package.json in its `exports` field. require.resolve()
-        # of the entry point + a sibling fs.readFileSync sidesteps both.
-        # node's resolver searches relative to process.cwd() under -e, so
-        # we cd into the package first.
-        run: |
-          SDK_VERSION=$(cd packages/deepsec && node -e "
-          const path = require('path');
-          const fs = require('fs');
-          const sdk = require.resolve('@anthropic-ai/claude-agent-sdk');
-          const pkg = JSON.parse(fs.readFileSync(path.join(path.dirname(sdk), 'package.json'), 'utf8'));
-          process.stdout.write(pkg.claudeCodeVersion);
-          ")
-          if [ -z "$SDK_VERSION" ]; then
-            echo "::error::Could not resolve claudeCodeVersion from @anthropic-ai/claude-agent-sdk"
-            exit 1
-          fi
-          echo "Installing @anthropic-ai/claude-code@${SDK_VERSION}"
-          npm install -g "@anthropic-ai/claude-code@${SDK_VERSION}"
-          BIN=$(which claude)
-          echo "claude bin: $BIN"
-          echo "bin=$BIN" >> "$GITHUB_OUTPUT"
-
-      # Fork PRs don't get the secret; skip the AI step cleanly instead
-      # of letting the binary blow up later.
-      - name: Check for AI Gateway secret
-        id: check-secret
-        env:
-          KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-        run: |
-          if [ -z "$KEY" ]; then
-            echo "have_key=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::AI_GATEWAY_API_KEY not set — skipping deepsec review (likely a fork PR)."
-          else
-            echo "have_key=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: deepsec process --diff
-        if: steps.check-secret.outputs.have_key == 'true'
-        id: deepsec
+      - id: deepsec
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-          CLAUDE_CODE_EXECUTABLE: ${{ steps.claude-code.outputs.bin }}
+          CLAUDE_CODE_EXECUTABLE: claude
         run: |
           pnpm deepsec process \
             --diff origin/${{ github.event.pull_request.base.ref }} \
             --comment-out comment.md
 
-      - name: Comment findings on PR
-        # Runs only when the deepsec step exited 1 (findings present)
-        # AND a comment was actually written. `hashFiles` returns ''
-        # when the path doesn't exist, so the second guard handles
-        # non-finding failures (timeouts, OOM, …).
-        if: failure() && steps.deepsec.outcome == 'failure' && hashFiles('comment.md') != ''
+      - if: always() && hashFiles('comment.md') != ''
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync('comment.md', 'utf8');
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body
-            })
+              body: fs.readFileSync('comment.md', 'utf8'),
+            });
