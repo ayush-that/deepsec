@@ -21,17 +21,6 @@
       "entry": ["src/config.ts", "src/sandbox/request-proxy.mjs!", "src/__tests__/**/*.test.ts"]
     }
   },
-  "ignore": [
-    "fixtures/vulnerable-app/**",
-    "samples/**",
-    // .deepsec/ is the runtime workspace consumed by the bundled CLI via
-    // jiti — `deepsec.config.ts` and `matchers/*.ts` are loaded dynamically
-    // and have no static import path knip can follow.
-    ".deepsec/**"
-  ],
-  "ignoreDependencies": [
-    "@anthropic-ai/claude-agent-sdk",
-    "@openai/codex",
-    "@openai/codex-sdk"
-  ]
+  "ignore": ["fixtures/vulnerable-app/**", "samples/**", ".deepsec/**"],
+  "ignoreDependencies": ["@anthropic-ai/claude-agent-sdk", "@openai/codex", "@openai/codex-sdk"]
 }
