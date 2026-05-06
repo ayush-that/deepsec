@@ -5,8 +5,8 @@ deepsec talks to LLMs through two interchangeable backends:
 | Backend                     | Default model         | Used by                      |
 |-----------------------------|-----------------------|------------------------------|
 | `codex` (default)           | `gpt-5.5`             | `process`, `revalidate`      |
-| `claude-agent-sdk`          | `claude-opus-4-7`     | `process`, `revalidate`      |
-| `claude-agent-sdk` (triage)  | `claude-sonnet-4-6`   | `triage` (Claude-only)       |
+| `claude`                    | `claude-opus-4-7`     | `process`, `revalidate`      |
+| `claude` (triage)           | `claude-sonnet-4-6`   | `triage` (Claude-only)       |
 
 Both backends route through [Vercel AI Gateway](https://vercel.com/ai-gateway)
 by default, so a single token covers Claude **and** Codex. To use

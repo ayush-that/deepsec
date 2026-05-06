@@ -7,7 +7,7 @@ describe("resolveAgentType", () => {
     setLoadedConfig(defineConfig({ projects: [] }));
   });
 
-  it("returns the user-provided value when given", () => {
+  it("accepts the legacy claude-agent-sdk value", () => {
     setLoadedConfig(defineConfig({ projects: [], defaultAgent: "codex" }));
     expect(resolveAgentType("claude-agent-sdk")).toBe("claude-agent-sdk");
   });

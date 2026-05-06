@@ -71,7 +71,7 @@ by default:
 | `--agent` | SDK | Default model |
 |---|---|---|
 | `codex` (default) | `@openai/codex-sdk` | `gpt-5.5` |
-| `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | `claude-opus-4-7` |
+| `claude` | `@anthropic-ai/claude-agent-sdk` | `claude-opus-4-7` |
 
 Same prompt, same JSON output schema. You can mix backends within a
 project — re-process a file with a different agent and the second run's
