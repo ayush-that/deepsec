@@ -82,9 +82,7 @@ describe("classifyQuotaError", () => {
   });
 
   it("Codex binary: canonical 'You've hit your usage limit' phrasing", () => {
-    expect(classifyQuotaError("You've hit your usage limit.", "codex")).toBe(
-      "openai-subscription",
-    );
+    expect(classifyQuotaError("You've hit your usage limit.", "codex")).toBe("openai-subscription");
     expect(
       classifyQuotaError(
         "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus)",
@@ -146,9 +144,7 @@ describe("classifyQuotaError", () => {
 
     // HTTP 403 — customer_verification_required (no card on file).
     expect(
-      classifyQuotaError(
-        "AI Gateway requires a valid credit card on file to service requests.",
-      ),
+      classifyQuotaError("AI Gateway requires a valid credit card on file to service requests."),
     ).toBe("gateway-credits");
     expect(classifyQuotaError("type: customer_verification_required")).toBe("gateway-credits");
 

@@ -37,6 +37,7 @@ export { AgentRegistry } from "./agents/registry.js";
 export {
   classifyQuotaError,
   isUsingAiGateway,
+  type QuotaAgentHint,
   QuotaExhaustedError,
   type QuotaSource,
 } from "./agents/shared.js";

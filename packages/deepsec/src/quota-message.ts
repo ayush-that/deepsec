@@ -74,9 +74,7 @@ export function renderQuotaMessage(args: {
   // gateway. We never tell a gateway user to "switch to gateway."
   if (onGateway || source === "gateway-credits") {
     lines.push("");
-    lines.push(
-      "  Your Vercel AI Gateway balance is empty. Add credits or enable",
-    );
+    lines.push("  Your Vercel AI Gateway balance is empty. Add credits or enable");
     lines.push("  auto-top-up:");
     lines.push("");
     lines.push(`    Top up now:  ${AI_GATEWAY_TOPUP_URL}`);

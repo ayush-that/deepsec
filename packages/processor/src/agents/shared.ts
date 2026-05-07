@@ -57,10 +57,7 @@ export type QuotaAgentHint = "claude" | "codex";
  * generic but accurate stop-and-direct-to-AI-Gateway message; misses
  * fall through to the existing fail-loud retry logic. Loose > strict.
  */
-export function classifyQuotaError(
-  msg: string,
-  hint?: QuotaAgentHint,
-): QuotaSource | undefined {
+export function classifyQuotaError(msg: string, hint?: QuotaAgentHint): QuotaSource | undefined {
   if (!msg) return undefined;
   const m = msg.toLowerCase();
 
@@ -88,10 +85,10 @@ export function classifyQuotaError(
     // Prose form of `quota_for_entity_exceeded` from check-quota-entity.ts:
     //   `Quota limit exceeded for "<id>". Current spend: $X, limit: $Y.`
     /\bquota limit exceeded for\b/.test(m) ||
-    /ai[_ \-]?gateway[^.]*?(insufficient[_ ]?credits?|credit balance|out of credits|payment required)/.test(
+    /ai[_ -]?gateway[^.]*?(insufficient[_ ]?credits?|credit balance|out of credits|payment required)/.test(
       m,
     ) ||
-    /ai[_ \-]?gateway.*\b402\b/.test(m) ||
+    /ai[_ -]?gateway.*\b402\b/.test(m) ||
     // Plain "insufficient credits" without provider attribution typically
     // comes from the gateway; direct providers say "credit balance" or
     // "insufficient_quota" instead.
@@ -112,9 +109,7 @@ export function classifyQuotaError(
     /\bbilling_error\b/.test(m) ||
     // Loose net for prose like "low credit balance" / "insufficient
     // balance" near a Claude/Anthropic mention.
-    /(claude|anthropic|claude\.com)[^.]{0,80}\b(low|insufficient)\b[^.]{0,40}\bbalance\b/.test(
-      m,
-    ) ||
+    /(claude|anthropic|claude\.com)[^.]{0,80}\b(low|insufficient)\b[^.]{0,40}\bbalance\b/.test(m) ||
     // The Claude binary also emits `platform.claude.com/settings/billing`
     // alongside the credit message — a hard correlation.
     /platform\.claude\.com\/settings\/billing/.test(m)
