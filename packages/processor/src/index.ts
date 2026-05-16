@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { FileRecord, Severity } from "@deepsec/core";
 import {
@@ -8,10 +9,12 @@ import {
   dataDir,
   defaultConcurrency,
   getRegistry,
+  isPidAlive,
   loadAllFileRecords,
   readFileRecord,
   readProjectConfig,
   readRunMeta,
+  registerActiveRun,
   writeFileRecord,
   writeRunMeta,
 } from "@deepsec/core";
@@ -276,6 +279,14 @@ export async function process(params: {
     runId = meta.runId;
   }
 
+  // Catch SIGINT/SIGTERM and any thrown error path: flip the run's
+  // phase to "error" so its locks become immediately reclaimable by
+  // the next invocation instead of waiting out STALE_LOCK_MS (1h).
+  // Hard kills (SIGKILL/OOM/power) bypass this; those are handled by
+  // the PID-liveness branch in isReclaimableLock.
+  const unregisterRun = registerActiveRun(projectId, runId);
+
+  try {
   const registry = createDefaultAgentRegistry();
   const maybeAgent = registry.get(agentType);
   if (!maybeAgent) {
@@ -289,35 +300,55 @@ export async function process(params: {
   // run grabs files the first run is mid-investigation on, both write
   // back, and findings/history get clobbered.
   //
-  // A lock is reclaimable when EITHER:
+  // A lock is reclaimable when ANY of:
   //   1. The owning run's RunMeta says it's done/error/missing — the
-  //      lock won't be released by the original owner, ever.
-  //   2. The lock is older than STALE_LOCK_MS and the owning run's
-  //      RunMeta phase is still "running" (likely a hard crash; the
-  //      heartbeat would update lockedAt during normal progress).
+  //      lock won't be released by the original owner, ever. Covers the
+  //      graceful-shutdown path (SIGINT/SIGTERM) where we proactively
+  //      flip the run to `error` before exiting.
+  //   2. The owning run was started on this host and its PID is no
+  //      longer alive — the run crashed (SIGKILL / OOM / power loss)
+  //      without flipping phase. PID liveness gives us instant recovery
+  //      instead of waiting out STALE_LOCK_MS.
+  //   3. The lock is older than STALE_LOCK_MS — backstop for cross-host
+  //      stale runs and any case where neither phase nor PID tell us.
   //
   // STALE_LOCK_MS is generous (1h) because individual investigations
   // can legitimately take 20–40 minutes on big repos with max
   // thinking. False reclaims are catastrophic; false rejections only
   // cost a retry on the next run.
   const STALE_LOCK_MS = 60 * 60 * 1000;
+  const localHostname = os.hostname();
   const isReclaimableLock = (r: FileRecord): boolean => {
     if (!r.lockedByRunId) return true;
     // Cross-check the owning run's status. A done/error/missing run's
     // lock is always safe to reclaim — nobody is going to flip the
     // record back to "analyzed".
-    let ownerPhase: "running" | "done" | "error" | undefined;
+    let ownerMeta: Awaited<ReturnType<typeof readRunMeta>> | undefined;
     try {
-      ownerPhase = readRunMeta(projectId, r.lockedByRunId).phase;
+      ownerMeta = readRunMeta(projectId, r.lockedByRunId);
     } catch {
       // Missing/corrupt run-meta — owning run is gone, reclaim safely.
       return true;
     }
-    if (ownerPhase === "done" || ownerPhase === "error") return true;
-    // Owner reports running — only reclaim after a stale-lock timeout
-    // (hard crashes leave phase=running forever). Records written
-    // before lockedAt existed have no timestamp; treat those as old
-    // enough to reclaim so we can recover legacy locked state.
+    if (ownerMeta.phase === "done" || ownerMeta.phase === "error") return true;
+    // Owner reports running — but it may have crashed without updating
+    // phase. If the run was started on this host and we recorded its
+    // PID, check whether the process is still alive. A dead PID means
+    // the run is genuinely gone and the lock can be reclaimed now,
+    // without waiting out STALE_LOCK_MS. Cross-host (different
+    // hostname) we can't probe, so we fall through to the timestamp
+    // check.
+    if (
+      ownerMeta.pid !== undefined &&
+      ownerMeta.hostname !== undefined &&
+      ownerMeta.hostname === localHostname &&
+      !isPidAlive(ownerMeta.pid)
+    ) {
+      return true;
+    }
+    // Records written before lockedAt existed have no timestamp; treat
+    // those as old enough to reclaim so we can recover legacy locked
+    // state.
     if (!r.lockedAt) return true;
     const ageMs = Date.now() - new Date(r.lockedAt).getTime();
     return ageMs >= STALE_LOCK_MS;
@@ -754,6 +785,20 @@ export async function process(params: {
     errorBatchCount: batchesFailed,
     quotaExhausted,
   };
+  } catch (err) {
+    // Body threw before completing. Flip phase to "error" so the
+    // run's locks become reclaimable on the next call rather than
+    // staying "running" with a live PID (which the same-process
+    // case would otherwise treat as a healthy owner).
+    try {
+      completeRun(projectId, runId, "error");
+    } catch {
+      // best-effort
+    }
+    throw err;
+  } finally {
+    unregisterRun();
+  }
 }
 
 // --- Revalidation ---
@@ -859,6 +904,13 @@ export async function revalidate(params: {
     runId = meta.runId;
   }
 
+  // Same shutdown handling as process(): revalidate doesn't lock
+  // FileRecords, but the RunMeta itself can otherwise be stranded at
+  // phase="running" forever on Ctrl+C, which is misleading in status
+  // listings.
+  const unregisterRun = registerActiveRun(projectId, runId);
+
+  try {
   const registry = createDefaultAgentRegistry();
   const maybeAgent = registry.get(agentType);
   if (!maybeAgent) {
@@ -1123,4 +1175,14 @@ export async function revalidate(params: {
     uncertain: totalUncertain,
     quotaExhausted,
   };
+  } catch (err) {
+    try {
+      completeRun(projectId, runId, "error");
+    } catch {
+      // best-effort
+    }
+    throw err;
+  } finally {
+    unregisterRun();
+  }
 }
