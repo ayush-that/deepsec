@@ -207,13 +207,23 @@ function flushActiveRuns(): void {
 function installShutdownHandlers(): void {
   if (shutdownHandlersInstalled) return;
   shutdownHandlersInstalled = true;
-  const handler = () => {
+  const handler = (signal: NodeJS.Signals) => {
     flushActiveRuns();
-    // Do NOT call process.exit here — other listeners (e.g. the
-    // sandbox shutdown handler in `deepsec/sandbox/shutdown.ts`) need
-    // to run their own cleanup before the process actually terminates.
-    // Node will exit naturally once all signal listeners return and no
-    // active work remains, or the sandbox handler's exit() will fire.
+    // Attaching a listener for SIGINT/SIGTERM suppresses Node's
+    // default termination, so we have to provide an exit path
+    // ourselves or the process hangs after Ctrl+C. When another
+    // listener is also registered (e.g. the sandbox shutdown handler
+    // in `deepsec/sandbox/shutdown.ts`), defer to it — that handler
+    // needs async cleanup time and calls process.exit() itself once
+    // its sandboxes have stopped (or its 10s timeout fires).
+    //
+    // listenerCount counts the currently-executing handler too, so
+    // "1" means we're the only listener.
+    if (process.listenerCount(signal) <= 1) {
+      // Conventional signal exit codes: 128 + signal number
+      // (SIGINT=2 → 130, SIGTERM=15 → 143).
+      process.exit(signal === "SIGINT" ? 130 : 143);
+    }
   };
   process.on("SIGINT", handler);
   process.on("SIGTERM", handler);
