@@ -20,8 +20,10 @@ import type {
   BatchMeta,
   InvestigateOutput,
   InvestigateParams,
+  InvestigateResult,
   RevalidateOutput,
   RevalidateParams,
+  RevalidateVerdict,
 } from "./types.js";
 
 /**
@@ -391,7 +393,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
       );
     }
 
-    let results;
+    let results: InvestigateResult[];
     try {
       results = parseInvestigateResults(resultText, batch);
     } catch (err) {
@@ -548,7 +550,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
     }
 
     const durationMs = Date.now() - startTime;
-    let verdicts;
+    let verdicts: RevalidateVerdict[];
     try {
       verdicts = parseRevalidateVerdicts(resultText);
     } catch (err) {

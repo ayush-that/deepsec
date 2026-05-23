@@ -32,8 +32,10 @@ import type {
   BatchMeta,
   InvestigateOutput,
   InvestigateParams,
+  InvestigateResult,
   RevalidateOutput,
   RevalidateParams,
+  RevalidateVerdict,
 } from "./types.js";
 
 const DEFAULT_MODEL = "gpt-5.5";
@@ -843,7 +845,7 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
         );
       }
 
-      let parsed;
+      let parsed: InvestigateResult[];
       try {
         parsed = parseInvestigateResults(resultText, batch);
       } catch (err) {
@@ -1073,7 +1075,7 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
         );
       }
 
-      let verdicts;
+      let verdicts: RevalidateVerdict[];
       try {
         verdicts = parseRevalidateVerdicts(resultText);
       } catch (err) {
