@@ -12,6 +12,7 @@ import {
   parseRevalidateVerdicts,
   QuotaExhaustedError,
   REFUSAL_FOLLOWUP_PROMPT,
+  writeParseFailureDebug,
 } from "./shared.js";
 import type {
   AgentPlugin,
@@ -172,7 +173,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
   type = "claude-agent-sdk";
 
   async *investigate(params: InvestigateParams): AsyncGenerator<AgentProgress, InvestigateOutput> {
-    const { batch, projectRoot, promptTemplate, projectInfo, config, signal } = params;
+    const { batch, projectRoot, promptTemplate, projectInfo, config, signal, projectId } = params;
     const model = (config.model as string) ?? "claude-opus-4-7";
     const maxTurns = (config.maxTurns as number) ?? 150;
     // Bridge the processor-supplied AbortSignal to an AbortController the
@@ -390,8 +391,23 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
       );
     }
 
+    let results;
+    try {
+      results = parseInvestigateResults(resultText, batch);
+    } catch (err) {
+      writeParseFailureDebug({
+        projectId,
+        phase: "investigate",
+        agentType: this.type,
+        resultText,
+        error: err,
+        batch,
+      });
+      throw err;
+    }
+
     return {
-      results: parseInvestigateResults(resultText, batch),
+      results,
       meta: {
         durationMs,
         ...sdkMeta,
@@ -401,7 +417,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
   }
 
   async *revalidate(params: RevalidateParams): AsyncGenerator<AgentProgress, RevalidateOutput> {
-    const { batch, projectRoot, projectInfo, config, force = false, signal } = params;
+    const { batch, projectRoot, projectInfo, config, force = false, signal, projectId } = params;
     const model = (config.model as string) ?? "claude-opus-4-7";
     const maxTurns = (config.maxTurns as number) ?? 150;
 
@@ -532,7 +548,20 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
     }
 
     const durationMs = Date.now() - startTime;
-    const verdicts = parseRevalidateVerdicts(resultText);
+    let verdicts;
+    try {
+      verdicts = parseRevalidateVerdicts(resultText);
+    } catch (err) {
+      writeParseFailureDebug({
+        projectId,
+        phase: "revalidate",
+        agentType: this.type,
+        resultText,
+        error: err,
+        batch,
+      });
+      throw err;
+    }
 
     const refusal = await runRefusalFollowUp(sdkMeta.agentSessionId, model, projectRoot);
     if (refusal?.refused) {

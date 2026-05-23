@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
-import type { FileRecord, Finding, RefusalReport } from "@deepsec/core";
+import fs from "node:fs";
+import path from "node:path";
+import { dataDir, type FileRecord, type Finding, type RefusalReport } from "@deepsec/core";
 import type { InvestigateResult, RevalidateVerdict } from "./types.js";
 
 // --- Retry / backoff -------------------------------------------------------
@@ -387,6 +389,48 @@ After your investigation, output a JSON block with your findings for EACH file. 
 **vulnSlug** can be any of the known categories OR a custom slug for issues not covered by the scanner. Use \`"other"\` as the slug prefix for novel findings (e.g., \`"other-race-condition"\`, \`"other-logic-bug"\`, \`"other-info-disclosure"\`).
 
 If a file has no real vulnerabilities after thorough investigation, include it with an empty findings array.`;
+}
+
+/**
+ * Persist the raw agent output that failed to parse as JSON to a debug
+ * location. Lives at `data/<projectId>/debug/parse-error-<phase>-<ts>.txt`
+ * so a sandbox run picks it up in the normal results tarball — the
+ * sandbox download allowlist explicitly accepts `debug/*.txt`.
+ *
+ * Best-effort: never throws (callers are already on the error path and
+ * we don't want to mask the original JSON-parse error with a disk-full
+ * EIO). Returns the path written to, or undefined on failure.
+ */
+export function writeParseFailureDebug(params: {
+  projectId?: string;
+  phase: "investigate" | "revalidate";
+  agentType: string;
+  resultText: string;
+  error: unknown;
+  batch?: FileRecord[];
+}): string | undefined {
+  const { projectId, phase, agentType, resultText, error, batch } = params;
+  if (!projectId) return undefined;
+  try {
+    const dir = path.join(dataDir(projectId), "debug");
+    fs.mkdirSync(dir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const file = path.join(dir, `parse-error-${phase}-${ts}.txt`);
+    const errMsg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    const filesList = batch?.map((b) => `  - ${b.filePath}`).join("\n") ?? "  (none)";
+    const header =
+      `# deepsec parse-failure debug dump\n` +
+      `# phase: ${phase}\n` +
+      `# agentType: ${agentType}\n` +
+      `# timestamp: ${new Date().toISOString()}\n` +
+      `# error: ${errMsg}\n` +
+      `# batch (${batch?.length ?? 0} files):\n${filesList}\n` +
+      `# --- raw agent output begins on next line ---\n`;
+    fs.writeFileSync(file, header + resultText, "utf-8");
+    return file;
+  } catch {
+    return undefined;
+  }
 }
 
 export function parseInvestigateResults(

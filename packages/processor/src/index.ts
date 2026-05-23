@@ -585,6 +585,7 @@ export async function process(params: {
           projectInfo: projectInfoForAgent,
           config,
           signal: quotaAbort.signal,
+          projectId,
         });
 
         let result = await gen.next();
@@ -1015,6 +1016,7 @@ export async function revalidate(params: {
           config,
           force,
           signal: quotaAbort.signal,
+          projectId,
         });
 
         let result = await gen.next();

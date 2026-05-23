@@ -21,6 +21,13 @@ export interface InvestigateParams {
    * request rather than waiting for the next polled message.
    */
   signal?: AbortSignal;
+  /**
+   * Project id, used by agent plugins for debug-log placement (e.g.
+   * raw agent output that failed JSON parsing is written under
+   * `data/<projectId>/debug/` so it survives a sandbox run via the
+   * normal tarball download).
+   */
+  projectId?: string;
 }
 
 export interface InvestigateResult {
@@ -64,6 +71,8 @@ export interface RevalidateParams {
   force?: boolean;
   /** See InvestigateParams.signal — same semantics for revalidation. */
   signal?: AbortSignal;
+  /** See InvestigateParams.projectId — used for debug-log placement. */
+  projectId?: string;
 }
 
 export interface RevalidateVerdict {

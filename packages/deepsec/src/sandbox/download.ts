@@ -6,11 +6,15 @@ import * as tar from "tar";
 import { mergeAfterExtract, snapshotFileRecords } from "./merge-records.js";
 import { DATA_DIR } from "./setup.js";
 
-// Sandbox results are JSON file records, run metadata, and reports —
-// nothing else. Lock the extract to these extensions so a tampered or
-// buggy tarball can't smuggle anything else onto the host. If the
-// sandbox legitimately needs to return a new file type, add it here.
-const ALLOWED_EXTENSIONS = new Set([".json", ".md", ".csv"]);
+// Sandbox results are JSON file records, run metadata, reports, and
+// debug dumps — nothing else. Lock the extract to these extensions so a
+// tampered or buggy tarball can't smuggle anything else onto the host.
+// If the sandbox legitimately needs to return a new file type, add it
+// here. `.txt` is for parse-failure debug dumps (see
+// `writeParseFailureDebug` in the processor); the agent's raw response
+// that failed JSON parsing is preserved verbatim and isn't guaranteed
+// to be valid JSON, hence a separate extension.
+const ALLOWED_EXTENSIONS = new Set([".json", ".md", ".csv", ".txt"]);
 
 // Namespace allowlist applied to every entry path inside the per-project
 // tarball. The sandbox is the explicit trust boundary — even if someone
@@ -32,6 +36,12 @@ const ALLOWED_ENTRY_PATTERNS: RegExp[] = [
   /^\.?\/?files\/(?:[^/\\\0]+\/)*[^/\\\0]+\.json$/,
   /^\.?\/?runs\/[^/\\\0]+\.json$/,
   /^\.?\/?reports\/report[^/\\\0]*\.(?:json|md|csv)$/,
+  // Parse-failure dumps from the processor: a flat directory containing
+  // `parse-error-<phase>-<timestamp>.txt` files. Names use only safe
+  // characters (the timestamp is an ISO string with `:`/`.` replaced by
+  // `-`), but the allowlist character class matches the same broad shape
+  // as the files/ pattern so future debug filenames don't get rejected.
+  /^\.?\/?debug\/[^/\\\0]+\.txt$/,
 ];
 
 // Belt-and-suspenders caps on a sandbox-supplied tarball. The numbers err

@@ -89,6 +89,26 @@ describe("extractTarballLocally — strict allowlist", () => {
     expect(fs.existsSync(path.join(destDir, "reports", "report.md"))).toBe(true);
   });
 
+  it("accepts parse-failure debug dumps under debug/*.txt", async () => {
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-tar-debug-"));
+    fs.mkdirSync(path.join(src, "debug"));
+    fs.writeFileSync(
+      path.join(src, "debug", "parse-error-investigate-2026-01-01T00-00-00-000Z.txt"),
+      "not actually json {",
+    );
+    const stats = await makeTarball(src, []);
+    fs.rmSync(src, { recursive: true, force: true });
+
+    const count = await extractTarballLocally(stats.tarPath, destDir);
+    fs.unlinkSync(stats.tarPath);
+    expect(count).toBe(1);
+    expect(
+      fs.existsSync(
+        path.join(destDir, "debug", "parse-error-investigate-2026-01-01T00-00-00-000Z.txt"),
+      ),
+    ).toBe(true);
+  });
+
   it("refuses a tarball with a disallowed extension and writes nothing", async () => {
     const src = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-tar-bad-"));
     fs.mkdirSync(path.join(src, "files"));
@@ -96,7 +116,10 @@ describe("extractTarballLocally — strict allowlist", () => {
       path.join(src, "files", "record.ts.json"),
       JSON.stringify(validRecord(path.basename(destDir), "record.ts")),
     );
-    fs.writeFileSync(path.join(src, "files", "secret.txt"), "uh oh");
+    // `.sh` is outside the allowlist (.json/.md/.csv/.txt). Plain `.txt`
+    // is now allowed for parse-failure debug dumps, so we pick an
+    // extension that's still rejected for the extension check itself.
+    fs.writeFileSync(path.join(src, "files", "secret.sh"), "uh oh");
     const stats = await makeTarball(src, []);
     fs.rmSync(src, { recursive: true, force: true });
 

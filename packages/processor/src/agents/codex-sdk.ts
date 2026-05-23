@@ -24,6 +24,7 @@ import {
   parseRevalidateVerdicts,
   QuotaExhaustedError,
   REFUSAL_FOLLOWUP_PROMPT,
+  writeParseFailureDebug,
 } from "./shared.js";
 import type {
   AgentPlugin,
@@ -627,7 +628,7 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
   type = "codex";
 
   async *investigate(params: InvestigateParams): AsyncGenerator<AgentProgress, InvestigateOutput> {
-    const { batch, projectRoot, promptTemplate, projectInfo, config, signal } = params;
+    const { batch, projectRoot, promptTemplate, projectInfo, config, signal, projectId } = params;
     const model = (config.model as string) ?? DEFAULT_MODEL;
     const effort = (config.reasoningEffort as ModelReasoningEffort) ?? DEFAULT_EFFORT;
 
@@ -842,7 +843,20 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
         );
       }
 
-      const parsed = parseInvestigateResults(resultText, batch);
+      let parsed;
+      try {
+        parsed = parseInvestigateResults(resultText, batch);
+      } catch (err) {
+        writeParseFailureDebug({
+          projectId,
+          phase: "investigate",
+          agentType: this.type,
+          resultText,
+          error: err,
+          batch,
+        });
+        throw err;
+      }
       if (DEBUG) {
         const matched = parsed.filter((r) => r.findings.length > 0).length;
         const totalFindings = parsed.reduce((s, r) => s + r.findings.length, 0);
@@ -873,7 +887,7 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
   }
 
   async *revalidate(params: RevalidateParams): AsyncGenerator<AgentProgress, RevalidateOutput> {
-    const { batch, projectRoot, projectInfo, config, force = false, signal } = params;
+    const { batch, projectRoot, projectInfo, config, force = false, signal, projectId } = params;
     const model = (config.model as string) ?? DEFAULT_MODEL;
     const effort = (config.reasoningEffort as ModelReasoningEffort) ?? DEFAULT_EFFORT;
 
@@ -1059,7 +1073,20 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
         );
       }
 
-      const verdicts = parseRevalidateVerdicts(resultText);
+      let verdicts;
+      try {
+        verdicts = parseRevalidateVerdicts(resultText);
+      } catch (err) {
+        writeParseFailureDebug({
+          projectId,
+          phase: "revalidate",
+          agentType: this.type,
+          resultText,
+          error: err,
+          batch,
+        });
+        throw err;
+      }
       if (DEBUG) {
         yield {
           type: "thinking",

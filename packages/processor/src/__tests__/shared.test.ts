@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   classifyQuotaError,
@@ -7,6 +10,7 @@ import {
   parseRefusalReport,
   parseRevalidateVerdicts,
   QuotaExhaustedError,
+  writeParseFailureDebug,
 } from "../agents/shared.js";
 
 describe("isTransientError", () => {
@@ -297,5 +301,49 @@ describe("parseRevalidateVerdicts", () => {
 
   it("throws on parse failure", () => {
     expect(() => parseRevalidateVerdicts("garbage")).toThrow(/wasn't parseable JSON/);
+  });
+});
+
+describe("writeParseFailureDebug", () => {
+  let tmp: string;
+  let prevDataRoot: string | undefined;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-debug-"));
+    prevDataRoot = process.env.DEEPSEC_DATA_ROOT;
+    process.env.DEEPSEC_DATA_ROOT = tmp;
+  });
+  afterEach(() => {
+    if (prevDataRoot === undefined) delete process.env.DEEPSEC_DATA_ROOT;
+    else process.env.DEEPSEC_DATA_ROOT = prevDataRoot;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("writes raw agent output to data/<projectId>/debug/parse-error-<phase>-<ts>.txt", () => {
+    const written = writeParseFailureDebug({
+      projectId: "demo",
+      phase: "investigate",
+      agentType: "claude-agent-sdk",
+      resultText: "{ not valid json",
+      error: new Error("Unexpected token n"),
+      batch: [],
+    });
+    expect(written).toBeDefined();
+    expect(written!).toMatch(/\/demo\/debug\/parse-error-investigate-.*\.txt$/);
+    const body = fs.readFileSync(written!, "utf-8");
+    expect(body).toContain("# phase: investigate");
+    expect(body).toContain("# agentType: claude-agent-sdk");
+    expect(body).toContain("Unexpected token n");
+    expect(body).toContain("{ not valid json");
+  });
+
+  it("is a no-op without a projectId", () => {
+    expect(
+      writeParseFailureDebug({
+        phase: "revalidate",
+        agentType: "codex",
+        resultText: "garbage",
+        error: new Error("x"),
+      }),
+    ).toBeUndefined();
   });
 });
