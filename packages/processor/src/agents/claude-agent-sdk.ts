@@ -176,7 +176,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
 
   async *investigate(params: InvestigateParams): AsyncGenerator<AgentProgress, InvestigateOutput> {
     const { batch, projectRoot, promptTemplate, projectInfo, config, signal, projectId } = params;
-    const model = (config.model as string) ?? "claude-opus-4-7";
+    const model = (config.model as string) ?? "claude-opus-4-8";
     const maxTurns = (config.maxTurns as number) ?? 150;
     // Bridge the processor-supplied AbortSignal to an AbortController the
     // SDK can consume — the SDK API takes an `AbortController` instance,
@@ -420,7 +420,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
 
   async *revalidate(params: RevalidateParams): AsyncGenerator<AgentProgress, RevalidateOutput> {
     const { batch, projectRoot, projectInfo, config, force = false, signal, projectId } = params;
-    const model = (config.model as string) ?? "claude-opus-4-7";
+    const model = (config.model as string) ?? "claude-opus-4-8";
     const maxTurns = (config.maxTurns as number) ?? 150;
 
     // See investigate() — bridges processor's abort signal into the SDK's

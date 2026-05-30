@@ -245,7 +245,7 @@ export async function process(params: {
     return prompt;
   };
 
-  const model = (config.model as string) ?? "claude-opus-4-7";
+  const model = (config.model as string) ?? "claude-opus-4-8";
 
   // Create or resume run
   let runId: string;
@@ -900,7 +900,7 @@ export async function revalidate(params: {
     projectInfo = fs.readFileSync(infoPath, "utf-8");
   } catch {}
 
-  const model = (config.model as string) ?? "claude-opus-4-7";
+  const model = (config.model as string) ?? "claude-opus-4-8";
 
   let runId: string;
   if (params.runId) {
