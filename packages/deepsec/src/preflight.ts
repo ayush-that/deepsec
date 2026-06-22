@@ -81,6 +81,10 @@ function isCodex(agentType: string | undefined): boolean {
   return agentType === "codex";
 }
 
+function isPi(agentType: string | undefined): boolean {
+  return agentType === "pi";
+}
+
 /**
  * Walk `$PATH` looking for a binary. Used as a positive signal that an
  * agent CLI (`claude`, `codex`) is set up on this host — if it's
@@ -134,11 +138,16 @@ function hasLocalCodexAgent(): boolean {
   return existsSync(join(codexHome, "auth.json"));
 }
 
+function hasLocalPiAgent(): boolean {
+  const piHome = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+  return existsSync(join(piHome, "auth.json"));
+}
+
 // Built-in backends we know how to credential-check. Agents registered
 // via plugins (deepsec.config.ts → plugins: [{ agents: [...] }]) handle
 // their own credential resolution, so we skip the check for anything
 // other than these.
-const KNOWN_BACKENDS = new Set<string>(["claude-agent-sdk", "codex"]);
+const KNOWN_BACKENDS = new Set<string>(["claude-agent-sdk", "codex", "pi"]);
 
 /**
  * Verify the orchestrator has an AI credential the chosen agent can use.
@@ -157,12 +166,15 @@ const KNOWN_BACKENDS = new Set<string>(["claude-agent-sdk", "codex"]);
  */
 export function assertAgentCredential(
   agentType: string | undefined,
-  options: { inSandbox?: boolean } = {},
+  options: { inSandbox?: boolean; aiApiKeyEnv?: string } = {},
 ): void {
   if (agentType !== undefined && !KNOWN_BACKENDS.has(agentType)) return;
 
+  const gateway = process.env.AI_GATEWAY_API_KEY;
   const anthropic = process.env.ANTHROPIC_AUTH_TOKEN;
+  const anthropicApi = process.env.ANTHROPIC_API_KEY;
   const openai = process.env.OPENAI_API_KEY;
+  const custom = options.aiApiKeyEnv ? process.env[options.aiApiKeyEnv] : undefined;
 
   if (isCodex(agentType)) {
     // Codex prefers OPENAI_API_KEY; AI Gateway issues a single token that
@@ -173,6 +185,20 @@ export function assertAgentCredential(
       `Missing AI credentials for --agent codex.\n` +
         `\n` +
         `  Add to .env.local:    AI_GATEWAY_API_KEY=vck_…   (or OPENAI_API_KEY=…)\n` +
+        `  Setup: ${SETUP_DOC_URL}`,
+    );
+  }
+
+  if (isPi(agentType)) {
+    if (gateway || custom) return;
+    if (!options.inSandbox && (anthropic || anthropicApi || openai || hasLocalPiAgent())) return;
+    const customHint = options.aiApiKeyEnv
+      ? `, or set ${options.aiApiKeyEnv}=… for the selected --ai-api-key-env`
+      : "";
+    throw new Error(
+      `Missing AI credentials for --agent pi.\n` +
+        `\n` +
+        `  Add to .env.local:    AI_GATEWAY_API_KEY=vck_…${customHint}\n` +
         `  Setup: ${SETUP_DOC_URL}`,
     );
   }

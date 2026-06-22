@@ -3,6 +3,7 @@ import path from "node:path";
 import { ensureProject, readProjectConfig } from "@deepsec/core";
 import { process as processRun } from "@deepsec/processor";
 import { scanFiles } from "@deepsec/scanner";
+import { buildAgentConfig } from "../agent-config.js";
 import { defaultModelForAgent } from "../agent-defaults.js";
 import { resolveFiles } from "../file-sources.js";
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../formatters.js";
@@ -80,6 +81,10 @@ export async function processCommand(opts: {
   agent?: string;
   model?: string;
   maxTurns?: number;
+  aiProvider?: string;
+  aiBaseUrl?: string;
+  aiApiKeyEnv?: string;
+  aiHeader?: string[];
   /** Commander yields `true` when bare; string (unparsed) when an arg is provided */
   reinvestigate?: boolean | string;
   limit?: number;
@@ -121,8 +126,9 @@ async function processStandardMode(opts: Parameters<typeof processCommand>[0]) {
   const effectiveRoot = opts.root ?? project.rootPath;
   const agentType = resolveAgentType(opts.agent);
   const model = opts.model ?? defaultModelForAgent(agentType);
+  const agentConfig = buildAgentConfig({ ...opts, model });
 
-  assertAgentCredential(agentType);
+  assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
 
   // --reinvestigate  → true (re-investigate all)
   // --reinvestigate 2 → number (only files with < 2 analyses)
@@ -164,7 +170,7 @@ async function processStandardMode(opts: Parameters<typeof processCommand>[0]) {
     projectId,
     runId: opts.runId,
     agentType,
-    config: { model, ...(opts.maxTurns ? { maxTurns: opts.maxTurns } : {}) },
+    config: agentConfig,
     reinvestigate,
     limit: opts.limit,
     concurrency: opts.concurrency,
@@ -267,7 +273,8 @@ async function processDirectMode(opts: Parameters<typeof processCommand>[0]) {
 
   const agentType = resolveAgentType(opts.agent);
   const model = opts.model ?? defaultModelForAgent(agentType);
-  assertAgentCredential(agentType);
+  const agentConfig = buildAgentConfig({ ...opts, model });
+  assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
 
   // Resolve the file list.
   const resolved = resolveFiles({
@@ -316,7 +323,7 @@ async function processDirectMode(opts: Parameters<typeof processCommand>[0]) {
     projectId,
     runId: opts.runId,
     agentType,
-    config: { model, ...(opts.maxTurns ? { maxTurns: opts.maxTurns } : {}) },
+    config: agentConfig,
     concurrency: opts.concurrency,
     batchSize: opts.batchSize,
     rootPathOverride: rootPath,

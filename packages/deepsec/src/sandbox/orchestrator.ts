@@ -231,6 +231,8 @@ async function bootstrapAndSpawn(
       const sandbox = await spawnFromSnapshot({
         snapshotId: snapshotId!,
         agentType: config.agentType,
+        aiApiKeyEnv: config.aiApiKeyEnv,
+        aiBaseUrl: config.aiBaseUrl,
         vcpus: config.vcpus,
         timeout: config.timeout,
         mode: ctx.mode,

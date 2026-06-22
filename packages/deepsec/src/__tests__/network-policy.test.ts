@@ -59,6 +59,9 @@ describe("buildWorkerNetworkPolicy", () => {
 
     const codexPolicy = buildWorkerNetworkPolicy({}, "codex");
     expect(allowedHosts(codexPolicy)).toEqual(["api.openai.com"]);
+
+    const piPolicy = buildWorkerNetworkPolicy({}, "pi");
+    expect(allowedHosts(piPolicy)).toEqual(["ai-gateway.vercel.sh"]);
   });
 
   it("falls back when the URL is unparseable", () => {
@@ -106,6 +109,21 @@ describe("buildWorkerNetworkPolicy", () => {
         { openaiToken: "vck_realtoken" },
       );
       expect(bearerFor(policy, "ai-gateway.vercel.sh")).toBe("Bearer vck_realtoken");
+    });
+
+    it("injects Authorization on the pi gateway host when a gateway token is provided", () => {
+      const policy = buildWorkerNetworkPolicy({}, "pi", { aiGatewayToken: "vck_pi" });
+      expect(bearerFor(policy, "ai-gateway.vercel.sh")).toBe("Bearer vck_pi");
+    });
+
+    it("uses the custom pi base URL host and custom token when provided", () => {
+      const policy = buildWorkerNetworkPolicy(
+        { DEEPSEC_PI_AI_BASE_URL: "https://api.withmartian.com/v1" },
+        "pi",
+        { customToken: { envName: "MARTIAN_API_KEY", token: "martian-real" } },
+      );
+      expect(allowedHosts(policy)).toEqual(["api.withmartian.com"]);
+      expect(bearerFor(policy, "api.withmartian.com")).toBe("Bearer martian-real");
     });
 
     it("emits no transform when no matching credential is provided", () => {

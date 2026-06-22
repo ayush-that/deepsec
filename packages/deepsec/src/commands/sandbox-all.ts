@@ -92,7 +92,10 @@ export async function sandboxAllCommand(
 
   // Same preflight as sandbox-process — fail fast before fanning out.
   assertSandboxCredential();
-  assertAgentCredential(agentType, { inSandbox: true });
+  assertAgentCredential(agentType, {
+    inSandbox: true,
+    aiApiKeyEnv: extractFlag(passthrough, "--ai-api-key-env"),
+  });
 
   console.log(`${BOLD}Sandbox All${RESET} — ${CYAN}${command}${RESET}`);
   console.log(`  Total sandboxes: ${totalSandboxes}`);
@@ -201,6 +204,8 @@ export async function sandboxAllCommand(
       concurrency,
       batchSize: parseInt(extractFlag(passthrough, "--batch-size") ?? "5", 10) || 5,
       agentType,
+      aiApiKeyEnv: extractFlag(passthrough, "--ai-api-key-env"),
+      aiBaseUrl: extractFlag(passthrough, "--ai-base-url"),
       model: extractFlag(passthrough, "--model") ?? defaultModelForAgent(agentType),
       snapshotId: undefined,
       saveSnapshot: false,

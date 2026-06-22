@@ -65,13 +65,13 @@ built-ins by reusing the same slug.
 - **Outputs:** FileRecord `findings[]` populated, `status: "analyzed"`,
   `analysisHistory[]` appended.
 
-Two agent backends are supported, both routed through Vercel AI Gateway
-by default:
+Three agent backends are supported:
 
 | `--agent` | SDK | Default model |
 |---|---|---|
 | `codex` (default) | `@openai/codex-sdk` | `gpt-5.5` |
-| `claude` | `@anthropic-ai/claude-agent-sdk` | `claude-opus-4-7` |
+| `claude` | `@anthropic-ai/claude-agent-sdk` | `claude-opus-4-8` |
+| `pi` | `@earendil-works/pi-coding-agent` | `zai/glm-5.2` |
 
 Same prompt, same JSON output schema. You can mix backends within a
 project — re-process a file with a different agent and the second run's

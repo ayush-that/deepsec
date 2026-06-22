@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,12 +33,19 @@ describe("assertAgentCredential", () => {
     saved = {
       ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
       OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
+      MARTIAN_API_KEY: process.env.MARTIAN_API_KEY,
       CLAUDE_HOME: process.env.CLAUDE_HOME,
       CODEX_HOME: process.env.CODEX_HOME,
+      PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
       PATH: process.env.PATH,
     };
     delete process.env.ANTHROPIC_AUTH_TOKEN;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.AI_GATEWAY_API_KEY;
+    delete process.env.MARTIAN_API_KEY;
     // Point CLAUDE_HOME / CODEX_HOME and PATH at empty tmp dirs so the
     // suite is hermetic — the dev running tests may have a real
     // ~/.codex/auth.json or `claude` on $PATH, which would cause
@@ -48,6 +55,8 @@ describe("assertAgentCredential", () => {
     emptyPathDir = mkdtempSync(join(tmpdir(), "deepsec-empty-path-"));
     process.env.CLAUDE_HOME = emptyClaudeHome;
     process.env.CODEX_HOME = emptyCodexHome;
+    process.env.PI_CODING_AGENT_DIR = join(emptyCodexHome, "pi-agent");
+    mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
     process.env.PATH = emptyPathDir;
   });
   afterEach(() => {
@@ -120,6 +129,28 @@ describe("assertAgentCredential", () => {
     // require fake ANTHROPIC_AUTH_TOKEN env vars.
     expect(() => assertAgentCredential("stub")).not.toThrow();
     expect(() => assertAgentCredential("anything-else")).not.toThrow();
+  });
+
+  it("passes for pi when AI_GATEWAY_API_KEY is set", () => {
+    process.env.AI_GATEWAY_API_KEY = "vck_gateway";
+    expect(() => assertAgentCredential("pi")).not.toThrow();
+  });
+
+  it("passes for pi when a custom --ai-api-key-env is set", () => {
+    process.env.MARTIAN_API_KEY = "martian-key";
+    expect(() => assertAgentCredential("pi", { aiApiKeyEnv: "MARTIAN_API_KEY" })).not.toThrow();
+  });
+
+  it("passes for pi when local Pi auth exists outside sandbox", () => {
+    const piHome = process.env.PI_CODING_AGENT_DIR!;
+    writeFileSync(join(piHome, "auth.json"), "{}");
+    expect(() => assertAgentCredential("pi")).not.toThrow();
+  });
+
+  it("ignores local Pi auth in sandbox mode", () => {
+    const piHome = process.env.PI_CODING_AGENT_DIR!;
+    writeFileSync(join(piHome, "auth.json"), "{}");
+    expect(() => assertAgentCredential("pi", { inSandbox: true })).toThrow(/AI_GATEWAY_API_KEY/);
   });
 });
 

@@ -1,6 +1,7 @@
 import type { Severity } from "@deepsec/core";
 import { readProjectConfig } from "@deepsec/core";
 import { revalidate } from "@deepsec/processor";
+import { buildAgentConfig } from "../agent-config.js";
 import { defaultModelForAgent } from "../agent-defaults.js";
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../formatters.js";
 import { assertAgentCredential } from "../preflight.js";
@@ -59,6 +60,10 @@ export async function revalidateCommand(opts: {
   agent?: string;
   model?: string;
   maxTurns?: number;
+  aiProvider?: string;
+  aiBaseUrl?: string;
+  aiApiKeyEnv?: string;
+  aiHeader?: string[];
   minSeverity?: string;
   force?: boolean;
   limit?: number;
@@ -74,11 +79,12 @@ export async function revalidateCommand(opts: {
   const _project = readProjectConfig(projectId);
   const agentType = resolveAgentType(opts.agent);
   const model = opts.model ?? defaultModelForAgent(agentType);
+  const agentConfig = buildAgentConfig({ ...opts, model });
   const minSeverity = opts.minSeverity as Severity | undefined;
   const onlySlugs = parseCsv(opts.onlySlugs);
   const skipSlugs = parseCsv(opts.skipSlugs);
 
-  assertAgentCredential(agentType);
+  assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
 
   console.log(`${BOLD}Revalidating${RESET} findings for project ${BOLD}${projectId}${RESET}`);
   console.log(`  Agent: ${agentType} (${model})`);
@@ -93,7 +99,7 @@ export async function revalidateCommand(opts: {
     projectId,
     runId: opts.runId,
     agentType,
-    config: { model, ...(opts.maxTurns ? { maxTurns: opts.maxTurns } : {}) },
+    config: agentConfig,
     minSeverity,
     force: opts.force,
     limit: opts.limit,

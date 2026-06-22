@@ -5,6 +5,7 @@ dotenvConfig(); // also load .env as fallback
 
 import { getRegistry } from "@deepsec/core";
 import { Command } from "commander";
+import { collectRepeatable } from "./agent-config.js";
 import { enrichCommand } from "./commands/enrich.js";
 import { exportCommand } from "./commands/export.js";
 import { initCommand } from "./commands/init.js";
@@ -132,12 +133,16 @@ program
   .option("--run-id <id>", "Resume a specific processing run")
   .option(
     "--agent <type>",
-    "Agent plugin type: codex or claude (default: defaultAgent in deepsec.config.ts, else codex)",
+    "Agent plugin type: codex, claude, or pi (default: defaultAgent in deepsec.config.ts, else codex)",
   )
   .option(
     "--model <model>",
-    "Model to use (default: claude-opus-4-8 for claude, gpt-5.5 for codex)",
+    "Model to use (default: claude-opus-4-8 for claude, gpt-5.5 for codex, zai/glm-5.2 for pi)",
   )
+  .option("--ai-provider <provider>", "Pi: provider to override for --ai-base-url / --ai-api-key-env (e.g. openai)")
+  .option("--ai-base-url <url>", "Pi: provider base URL override (e.g. a Martian/OpenAI-compatible gateway)")
+  .option("--ai-api-key-env <name>", "Pi: environment variable that holds the provider API key")
+  .option("--ai-header <name=value>", "Pi: extra provider request header; repeatable", collectRepeatable, [])
   .option("--max-turns <n>", "Max conversation turns per batch (default: 150)", parseInt)
   .option(
     "--reinvestigate [n]",
@@ -192,12 +197,16 @@ program
   .option("--run-id <id>", "Resume a specific revalidation run")
   .option(
     "--agent <type>",
-    "Agent plugin type: codex or claude (default: defaultAgent in deepsec.config.ts, else codex)",
+    "Agent plugin type: codex, claude, or pi (default: defaultAgent in deepsec.config.ts, else codex)",
   )
   .option(
     "--model <model>",
-    "Model to use (default: claude-opus-4-8 for claude, gpt-5.5 for codex)",
+    "Model to use (default: claude-opus-4-8 for claude, gpt-5.5 for codex, zai/glm-5.2 for pi)",
   )
+  .option("--ai-provider <provider>", "Pi: provider to override for --ai-base-url / --ai-api-key-env (e.g. openai)")
+  .option("--ai-base-url <url>", "Pi: provider base URL override (e.g. a Martian/OpenAI-compatible gateway)")
+  .option("--ai-api-key-env <name>", "Pi: environment variable that holds the provider API key")
+  .option("--ai-header <name=value>", "Pi: extra provider request header; repeatable", collectRepeatable, [])
   .option("--max-turns <n>", "Max conversation turns per batch (default: 150)", parseInt)
   .option(
     "--min-severity <sev>",
@@ -285,7 +294,7 @@ program
   .option("--require-owner", "Drop findings that have no ownership data (no assignee, no teams)")
   .option(
     "--only-agent <type>",
-    "Only export findings produced by this agent backend (e.g. codex, claude)",
+    "Only export findings produced by this agent backend (e.g. codex, claude, pi)",
   )
   .option(
     "--only-marker <n>",

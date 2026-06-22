@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildSandboxEnv, resolveBrokeredCredentials } from "../sandbox/setup.js";
 
 const TOUCHED_KEYS = [
+  "AI_GATEWAY_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_BASE_URL",
   "OPENAI_API_KEY",
   "OPENAI_BASE_URL",
+  "MARTIAN_API_KEY",
 ] as const;
 
 describe("credential brokering", () => {
@@ -51,6 +53,18 @@ describe("credential brokering", () => {
       process.env.OPENAI_API_KEY = "sk-explicit";
       const c = resolveBrokeredCredentials("codex");
       expect(c.openaiToken).toBe("sk-explicit");
+    });
+
+    it("captures AI_GATEWAY_API_KEY for the pi path", () => {
+      process.env.AI_GATEWAY_API_KEY = "vck_pi";
+      const c = resolveBrokeredCredentials("pi");
+      expect(c.aiGatewayToken).toBe("vck_pi");
+    });
+
+    it("captures a custom API key env for the pi path", () => {
+      process.env.MARTIAN_API_KEY = "martian-real";
+      const c = resolveBrokeredCredentials("pi", { aiApiKeyEnv: "MARTIAN_API_KEY" });
+      expect(c.customToken).toEqual({ envName: "MARTIAN_API_KEY", token: "martian-real" });
     });
   });
 
@@ -102,6 +116,34 @@ describe("credential brokering", () => {
       // ANTHROPIC_UPSTREAM_BASE_URL for the proxy to forward to.
       expect(env.ANTHROPIC_UPSTREAM_BASE_URL).toBe("https://ai-gateway.vercel.sh");
       expect(env.ANTHROPIC_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    });
+
+    it("never contains a real AI Gateway key on the pi path", () => {
+      process.env.AI_GATEWAY_API_KEY = "vck_real_pi_secret";
+      const credentials = resolveBrokeredCredentials("pi");
+      const env = buildSandboxEnv("pi", credentials);
+
+      expect(env.AI_GATEWAY_API_KEY).toBeDefined();
+      expect(env.AI_GATEWAY_API_KEY).not.toBe("vck_real_pi_secret");
+      for (const v of Object.values(env)) {
+        expect(v).not.toContain("vck_real_pi_secret");
+      }
+    });
+
+    it("never contains a real custom pi provider key", () => {
+      process.env.MARTIAN_API_KEY = "martian-real-secret";
+      const credentials = resolveBrokeredCredentials("pi", { aiApiKeyEnv: "MARTIAN_API_KEY" });
+      const env = buildSandboxEnv("pi", credentials, {
+        aiApiKeyEnv: "MARTIAN_API_KEY",
+        aiBaseUrl: "https://api.withmartian.com/v1",
+      });
+
+      expect(env.MARTIAN_API_KEY).toBeDefined();
+      expect(env.MARTIAN_API_KEY).not.toBe("martian-real-secret");
+      expect(env.DEEPSEC_PI_AI_BASE_URL).toBe("https://api.withmartian.com/v1");
+      for (const v of Object.values(env)) {
+        expect(v).not.toContain("martian-real-secret");
+      }
     });
   });
 });

@@ -1,17 +1,19 @@
 # Models
 
-deepsec talks to LLMs through two interchangeable backends:
+deepsec talks to LLMs through interchangeable agent backends:
 
 | Backend                     | Default model         | Used by                      |
 |-----------------------------|-----------------------|------------------------------|
 | `codex` (default)           | `gpt-5.5`             | `process`, `revalidate`      |
-| `claude`                    | `claude-opus-4-7`     | `process`, `revalidate`      |
+| `claude`                    | `claude-opus-4-8`     | `process`, `revalidate`      |
+| `pi`                        | `zai/glm-5.2`        | `process`, `revalidate` |
 | `claude` (triage)           | `claude-sonnet-4-6`   | `triage` (Claude-only)       |
 
-Both backends route through [Vercel AI Gateway](https://vercel.com/ai-gateway)
-by default, so a single token covers Claude **and** Codex. To use
-Anthropic or OpenAI directly, point `ANTHROPIC_BASE_URL` /
-`OPENAI_BASE_URL` at the provider.
+The built-in backends work with [Vercel AI Gateway](https://vercel.com/ai-gateway).
+One `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` covers Codex, Claude,
+and Pi. Pi also accepts provider/model identifiers directly through its
+model registry, which makes it useful for comparing gateway/provider
+behavior under the same deepsec workload.
 
 ## CLI selection
 
@@ -28,6 +30,12 @@ pnpm deepsec process --project-id my-app --agent codex
 # Codex backend, specific model:
 pnpm deepsec process --project-id my-app --agent codex --model gpt-5.4
 
+# Pi backend through Vercel AI Gateway, default model:
+pnpm deepsec process --project-id my-app --agent pi
+
+# Pi with an AI SDK / AI Gateway style model id:
+pnpm deepsec process --project-id my-app --agent pi --model zai/glm-5.2
+
 # Triage uses Claude; pass a cheaper model if you want:
 pnpm deepsec triage --project-id my-app --model claude-haiku-4-5
 ```
@@ -38,7 +46,7 @@ default backend project-wide via `defaultAgent` in
 
 ## Why these defaults
 
-### `claude-opus-4-7` for `process` and `revalidate`
+### `claude-opus-4-8` for `process` and `revalidate`
 
 Investigating a candidate site is a multi-step reasoning task: trace
 control flow, recognize an auth boundary, decide whether input is
@@ -57,6 +65,37 @@ strict read-only sandbox. `gpt-5.5` is the right balance of reasoning
 and cost for that loop. `gpt-5.5-pro` is the most careful Codex
 option at significantly higher cost; `gpt-5.4` and below are fine for
 follow-up reinvestigation passes.
+
+### Pi for alternate harness runs
+
+Pi uses `@earendil-works/pi-coding-agent` with read-only tools
+(`read`, `grep`, `find`, `ls`) and the same deepsec prompt/schema as the
+other backends. Its default model is GLM 5.2 through Vercel AI Gateway:
+
+```bash
+AI_GATEWAY_API_KEY=vck_...
+pnpm deepsec process --project-id my-app --agent pi
+```
+
+If `.env.local` has `VERCEL_OIDC_TOKEN` from `vercel env pull`, deepsec
+uses that as the gateway credential automatically.
+
+For OpenAI/Anthropic-compatible gateways such as Martian, point an
+existing Pi provider at the gateway with command-line flags:
+
+```bash
+MARTIAN_API_KEY=...
+pnpm deepsec process --project-id my-app \
+  --agent pi \
+  --model openai/gpt-5.5 \
+  --ai-provider openai \
+  --ai-base-url https://api.withmartian.com/v1 \
+  --ai-api-key-env MARTIAN_API_KEY
+```
+
+Repeat `--ai-header name=value` for provider-specific headers. There is
+no Martian-specific first-class integration; these flags are the generic
+provider override path.
 
 ### `claude-sonnet-4-6` for `triage`
 
@@ -103,6 +142,7 @@ rest of deepsec stays unchanged:
 ```bash
 pnpm deepsec process --project-id my-app --model anthropic-mythos-1
 pnpm deepsec process --project-id my-app --agent codex --model gpt-6
+pnpm deepsec process --project-id my-app --agent pi --model vercel-ai-gateway/openai/gpt-6
 ```
 
 Two small integration points:

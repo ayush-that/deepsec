@@ -16,6 +16,10 @@ describe("resolveAgentType", () => {
     expect(resolveAgentType("claude")).toBe("claude-agent-sdk");
   });
 
+  it("accepts pi as a built-in agent type", () => {
+    expect(resolveAgentType("pi")).toBe("pi");
+  });
+
   it("aliases claude from defaultAgent config", () => {
     setLoadedConfig(defineConfig({ projects: [], defaultAgent: "claude" }));
     expect(resolveAgentType(undefined)).toBe("claude-agent-sdk");

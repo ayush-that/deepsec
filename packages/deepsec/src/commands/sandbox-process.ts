@@ -74,6 +74,8 @@ function buildConfig(
     concurrency,
     batchSize: parseInt(extractFlag(args, "--batch-size") ?? "5", 10) || 5,
     agentType,
+    aiApiKeyEnv: extractFlag(args, "--ai-api-key-env"),
+    aiBaseUrl: extractFlag(args, "--ai-base-url"),
     model: extractFlag(args, "--model") ?? defaultModelForAgent(agentType),
     snapshotId: opts.snapshotId,
     saveSnapshot: opts.saveSnapshot ?? false,
@@ -147,7 +149,10 @@ export async function sandboxCommand(subcommand: string, opts: SandboxOpts) {
   // both a Vercel auth token (to create the sandbox) and an AI token (to
   // inject into the firewall transform).
   assertSandboxCredential();
-  assertAgentCredential(config.agentType, { inSandbox: true });
+  assertAgentCredential(config.agentType, {
+    inSandbox: true,
+    aiApiKeyEnv: config.aiApiKeyEnv,
+  });
 
   console.log(
     `${BOLD}Sandbox${RESET} — ${CYAN}${config.command}${RESET} — ${BOLD}${config.projectId}${RESET}`,
