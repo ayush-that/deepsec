@@ -319,10 +319,10 @@ export async function createBootstrapSnapshot(opts: BootstrapOptions): Promise<s
     });
     opts.onLog("  pnpm installed.");
 
-    // Install ripgrep + python3 — Codex agents prefer rg/python over grep/awk
+    // Install ripgrep + fd + python3. Agents prefer rg/fd over grep/find
     // for whole-tree searches, and several investigation patterns lean on
     // python3 for parsing AST / JSON. Best-effort: warn but don't fail the
-    // whole bootstrap if the package manager rejects either one.
+    // whole bootstrap if the package manager rejects any of them.
     await installAgentTools(sandbox, opts.onLog);
 
     // Upload app + target + data in parallel
@@ -586,15 +586,15 @@ rm -rf /tmp/claude-native-fetch
 }
 
 /**
- * Install ripgrep + python3 in the bootstrap sandbox so the Codex agent has
+ * Install ripgrep + fd + python3 in the bootstrap sandbox so agents have
  * efficient whole-tree search and a scripting language for ad-hoc analysis.
  * Detects the available package manager (dnf / microdnf / yum / apt-get).
  *
  * Best-effort: if neither tool can be installed, we log and move on. The
  * agent can fall back to grep / awk / shell.
  */
-async function installAgentTools(sandbox: Sandbox, onLog: (msg: string) => void): Promise<void> {
-  const script = `
+export function buildInstallAgentToolsScript(): string {
+  return `
 set -u
 log() { echo "  $*"; }
 
@@ -622,6 +622,39 @@ install_with() {
       apk add --no-cache "$pkg" 2>&1 | tail -5
       ;;
   esac
+}
+
+ensure_fd_alias() {
+  if command -v fd >/dev/null 2>&1; then return 0; fi
+  if command -v fdfind >/dev/null 2>&1; then
+    ln -sf "$(command -v fdfind)" /usr/local/bin/fd 2>/dev/null || true
+  fi
+}
+
+install_fd_from_github() {
+  local arch=""
+  case "$(uname -m)" in
+    x86_64) arch="x86_64-unknown-linux-gnu" ;;
+    aarch64|arm64) arch="aarch64-unknown-linux-gnu" ;;
+    *) log "WARN: unsupported arch $(uname -m) for fd prebuilt"; return 1 ;;
+  esac
+  local rel="10.3.0"
+  local url="https://github.com/sharkdp/fd/releases/download/v\${rel}/fd-v\${rel}-\${arch}.tar.gz"
+  log "Downloading fd \${rel} (\${arch}) from GitHub..."
+  rm -rf /tmp/fd-fetch && mkdir -p /tmp/fd-fetch && cd /tmp/fd-fetch
+  if ! curl -fsSL --retry 3 -o fd.tar.gz "\${url}"; then
+    log "WARN: fd download failed: \${url}"
+    return 1
+  fi
+  tar -xzf fd.tar.gz
+  local bin
+  bin=$(find . -maxdepth 3 -name fd -type f | head -1)
+  if [ -z "\${bin}" ]; then
+    log "WARN: fd binary not found in tarball"
+    return 1
+  fi
+  install -m 0755 "\${bin}" /usr/local/bin/fd
+  cd / && rm -rf /tmp/fd-fetch
 }
 
 # ripgrep: try the package manager first (Debian/Ubuntu/Alpine ship it),
@@ -669,6 +702,34 @@ else
   fi
 fi
 
+if command -v fd >/dev/null 2>&1 || command -v fdfind >/dev/null 2>&1; then
+  ensure_fd_alias
+  log "fd already installed: $(fd --version 2>/dev/null || fdfind --version | head -1)"
+else
+  log "Installing fd via package manager..."
+  case "$PM" in
+    apt-get)
+      install_with fd-find || true
+      ;;
+    apk)
+      install_with fd || true
+      ;;
+    *)
+      install_with fd-find || true
+      install_with fd || true
+      ;;
+  esac
+  ensure_fd_alias
+  if ! command -v fd >/dev/null 2>&1; then
+    install_fd_from_github || true
+  fi
+  if command -v fd >/dev/null 2>&1; then
+    log "fd ready: $(fd --version | head -1)"
+  else
+    log "WARN: fd still not on PATH — agents will fall back to find/glob implementations"
+  fi
+fi
+
 # python3: usually preinstalled on AL2023 / Ubuntu, but cover the edge case
 if command -v python3 >/dev/null 2>&1; then
   log "python3 already installed: $(python3 --version)"
@@ -679,6 +740,10 @@ else
 fi
 exit 0
 `;
+}
+
+async function installAgentTools(sandbox: Sandbox, onLog: (msg: string) => void): Promise<void> {
+  const script = buildInstallAgentToolsScript();
   const result = await sandbox.runCommand({
     cmd: "bash",
     args: ["-c", script],

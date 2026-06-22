@@ -6,11 +6,16 @@ import {
   type AgentSessionEvent,
   AuthStorage,
   createAgentSession,
+  createFindToolDefinition,
+  createGrepToolDefinition,
+  createLsToolDefinition,
+  createReadToolDefinition,
   DefaultResourceLoader,
   getAgentDir,
   ModelRegistry,
   SessionManager,
   SettingsManager,
+  type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import {
   backoff,
@@ -45,6 +50,7 @@ const GATEWAY_PROVIDER = "vercel-ai-gateway";
 
 const DEEPSEC_SYSTEM_NOTE =
   "You are running inside the Pi harness for deepsec. Use source inspection only. Do not run the target application, send network requests, or attempt exploitation. Return only the requested JSON object.";
+const FIND_SKIP_DIRS = new Set([".git", "node_modules"]);
 
 interface PiAgentConfig {
   model?: string;
@@ -68,6 +74,177 @@ interface PiPromptResult {
   meta: Partial<BatchMeta>;
   turnCount: number;
   toolUseCount: number;
+}
+
+interface RootGuard {
+  rootPath: string;
+  rootRealPath: string;
+}
+
+function pathIsInside(parent: string, candidate: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function createRootGuard(projectRoot: string): RootGuard {
+  return {
+    rootPath: path.resolve(projectRoot),
+    rootRealPath: fs.realpathSync.native(projectRoot),
+  };
+}
+
+function assertLexicallyInsideProjectRoot(guard: RootGuard, absolutePath: string): string {
+  const resolved = path.resolve(absolutePath);
+  if (!pathIsInside(guard.rootPath, resolved)) {
+    throw new Error(`Path escapes project root: ${absolutePath}`);
+  }
+  return resolved;
+}
+
+function assertInsideProjectRoot(guard: RootGuard, absolutePath: string): string {
+  const resolved = assertLexicallyInsideProjectRoot(guard, absolutePath);
+  const realPath = fs.realpathSync.native(resolved);
+  if (!pathIsInside(guard.rootRealPath, realPath)) {
+    throw new Error(`Path escapes project root: ${absolutePath}`);
+  }
+  return resolved;
+}
+
+function assertInsideProjectRootAllowMissing(guard: RootGuard, absolutePath: string): string {
+  const resolved = assertLexicallyInsideProjectRoot(guard, absolutePath);
+  try {
+    const realPath = fs.realpathSync.native(resolved);
+    if (!pathIsInside(guard.rootRealPath, realPath)) {
+      throw new Error(`Path escapes project root: ${absolutePath}`);
+    }
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+  }
+  return resolved;
+}
+
+function toPosixPath(value: string): string {
+  return value.split(path.sep).join("/");
+}
+
+function escapeRegexChar(value: string): string {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+function globToRegExp(pattern: string): RegExp {
+  const normalized = toPosixPath(pattern)
+    .replace(/^\.?\//, "")
+    .replace(/^\/+/, "");
+  let source = "^";
+  for (let i = 0; i < normalized.length; i++) {
+    const char = normalized[i];
+    if (char === "*") {
+      if (normalized[i + 1] === "*") {
+        if (normalized[i + 2] === "/") {
+          source += "(?:.*\\/)?";
+          i += 2;
+        } else {
+          source += ".*";
+          i += 1;
+        }
+      } else {
+        source += "[^/]*";
+      }
+    } else if (char === "?") {
+      source += "[^/]";
+    } else if (char === "/") {
+      source += "\\/";
+    } else {
+      source += escapeRegexChar(char);
+    }
+  }
+  source += "$";
+  return new RegExp(source);
+}
+
+function matchesFindPattern(relativePath: string, pattern: string): boolean {
+  const normalized = toPosixPath(relativePath);
+  const target = pattern.includes("/") ? normalized : path.posix.basename(normalized);
+  return globToRegExp(pattern).test(target);
+}
+
+async function guardedGlob(
+  guard: RootGuard,
+  pattern: string,
+  searchRoot: string,
+  limit: number,
+): Promise<string[]> {
+  const guardedRoot = assertInsideProjectRoot(guard, searchRoot);
+  const results: string[] = [];
+
+  async function walk(dir: string): Promise<void> {
+    if (results.length >= limit) return;
+    const guardedDir = assertInsideProjectRoot(guard, dir);
+    const entries = await fs.promises.readdir(guardedDir, { withFileTypes: true });
+    entries.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+
+    for (const entry of entries) {
+      if (results.length >= limit) return;
+      if (FIND_SKIP_DIRS.has(entry.name)) continue;
+      const fullPath = path.join(guardedDir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+        continue;
+      }
+      if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+      try {
+        assertInsideProjectRoot(guard, fullPath);
+      } catch {
+        continue;
+      }
+      const relativePath = path.relative(guardedRoot, fullPath);
+      if (matchesFindPattern(relativePath, pattern)) {
+        results.push(fullPath);
+      }
+    }
+  }
+
+  await walk(guardedRoot);
+  return results;
+}
+
+export function createPiReadOnlyToolDefinitions(projectRoot: string): ToolDefinition<any, any>[] {
+  const guard = createRootGuard(projectRoot);
+  return [
+    createReadToolDefinition(projectRoot, {
+      operations: {
+        readFile: (absolutePath) =>
+          fs.promises.readFile(assertInsideProjectRoot(guard, absolutePath)),
+        access: (absolutePath) =>
+          fs.promises.access(assertInsideProjectRoot(guard, absolutePath), fs.constants.R_OK),
+      },
+    }),
+    createGrepToolDefinition(projectRoot, {
+      operations: {
+        isDirectory: async (absolutePath) =>
+          (await fs.promises.stat(assertInsideProjectRoot(guard, absolutePath))).isDirectory(),
+        readFile: (absolutePath) =>
+          fs.promises.readFile(assertInsideProjectRoot(guard, absolutePath), "utf8"),
+      },
+    }),
+    createFindToolDefinition(projectRoot, {
+      operations: {
+        exists: (absolutePath) =>
+          fs.existsSync(assertInsideProjectRootAllowMissing(guard, absolutePath)),
+        glob: (pattern, cwd, options) => guardedGlob(guard, pattern, cwd, options.limit),
+      },
+    }),
+    createLsToolDefinition(projectRoot, {
+      operations: {
+        exists: (absolutePath) =>
+          fs.existsSync(assertInsideProjectRootAllowMissing(guard, absolutePath)),
+        stat: (absolutePath) => fs.promises.stat(assertInsideProjectRoot(guard, absolutePath)),
+        readdir: (absolutePath) =>
+          fs.promises.readdir(assertInsideProjectRoot(guard, absolutePath)),
+      },
+    }),
+  ] as ToolDefinition<any, any>[];
 }
 
 function readConfig(config: Record<string, unknown>): PiAgentConfig {
@@ -102,9 +279,10 @@ function configureRuntimeAuth(authStorage: AuthStorage, cfg: PiAgentConfig): voi
   const openaiKey = process.env.OPENAI_API_KEY;
   if (openaiKey) authStorage.setRuntimeApiKey("openai", openaiKey);
 
-  if (cfg.aiProvider && cfg.aiApiKeyEnv) {
+  const customProvider = cfg.aiProvider ?? modelProviderFromName(cfg.model);
+  if (customProvider && cfg.aiApiKeyEnv) {
     const key = process.env[cfg.aiApiKeyEnv];
-    if (key) authStorage.setRuntimeApiKey(cfg.aiProvider, key);
+    if (key) authStorage.setRuntimeApiKey(customProvider, key);
   }
 }
 
@@ -210,6 +388,7 @@ async function createPiSession(projectRoot: string, cfg: PiAgentConfig): Promise
     model,
     thinkingLevel: (cfg.thinkingLevel ?? DEFAULT_THINKING_LEVEL) as never,
     tools: DEFAULT_TOOLS,
+    customTools: createPiReadOnlyToolDefinitions(projectRoot),
   });
 
   return {

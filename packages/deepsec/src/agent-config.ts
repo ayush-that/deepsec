@@ -27,13 +27,27 @@ function parseAiHeaders(values: string[] | undefined): Record<string, string> | 
   return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
+function providerFromModel(model: string | undefined): string | undefined {
+  if (!model) return undefined;
+  const slash = model.indexOf("/");
+  if (slash <= 0) return undefined;
+  return model.slice(0, slash);
+}
+
 export function buildAgentConfig(opts: AgentRuntimeOpts): Record<string, unknown> {
   const aiHeaders = parseAiHeaders(opts.aiHeader);
+  const hasProviderOverride = Boolean(opts.aiBaseUrl || opts.aiApiKeyEnv || aiHeaders);
+  const effectiveProvider = opts.aiProvider ?? providerFromModel(opts.model);
+  if (hasProviderOverride && !effectiveProvider) {
+    throw new Error(
+      `Pi provider override flags require --ai-provider or a provider/model --model value.`,
+    );
+  }
   const config: Record<string, unknown> = {
     model: opts.model,
     ...(opts.maxTurns ? { maxTurns: opts.maxTurns } : {}),
   };
-  if (opts.aiProvider) config.aiProvider = opts.aiProvider;
+  if (opts.aiProvider || hasProviderOverride) config.aiProvider = effectiveProvider;
   if (opts.aiBaseUrl) config.aiBaseUrl = opts.aiBaseUrl;
   if (opts.aiApiKeyEnv) config.aiApiKeyEnv = opts.aiApiKeyEnv;
   if (aiHeaders) config.aiHeaders = aiHeaders;
