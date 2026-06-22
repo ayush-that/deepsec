@@ -235,7 +235,9 @@ export function buildWorkerNetworkPolicy(
   // already carries the ANTHROPIC gateway token if the user only set that
   // one and is running codex.
   const injectToken = isPi
-    ? (env[PI_CUSTOM_BASE_URL_ENV] ? credentials.customToken?.token : credentials.aiGatewayToken)
+    ? env[PI_CUSTOM_BASE_URL_ENV]
+      ? credentials.customToken?.token
+      : credentials.aiGatewayToken
     : isCodex
       ? credentials.openaiToken
       : credentials.anthropicToken;

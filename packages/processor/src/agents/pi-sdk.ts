@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import type { RefusalReport } from "@deepsec/core";
 import {
+  type AgentSession,
+  type AgentSessionEvent,
   AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
@@ -9,8 +11,6 @@ import {
   ModelRegistry,
   SessionManager,
   SettingsManager,
-  type AgentSession,
-  type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
 import {
   backoff,
@@ -132,7 +132,9 @@ function createAuthStorage(): AuthStorage {
 }
 
 function resolveModel(registry: ModelRegistry, requested: string, cfg: PiAgentConfig): PiModel {
-  const preferGateway = Boolean(process.env.AI_GATEWAY_API_KEY && !cfg.aiBaseUrl && !cfg.aiProvider);
+  const preferGateway = Boolean(
+    process.env.AI_GATEWAY_API_KEY && !cfg.aiBaseUrl && !cfg.aiProvider,
+  );
   if (preferGateway) {
     const gatewayModel = registry.find(GATEWAY_PROVIDER, requested);
     if (gatewayModel) return gatewayModel;
@@ -151,7 +153,9 @@ function resolveModel(registry: ModelRegistry, requested: string, cfg: PiAgentCo
     const matches = registry.getAll().filter((m) => m.id === requested);
     const gatewayMatch = matches.find((m) => m.provider === GATEWAY_PROVIDER);
     const availableMatch = matches.find((m) => registry.hasConfiguredAuth(m));
-    const firstMatch = preferGateway ? (gatewayMatch ?? availableMatch) : (availableMatch ?? gatewayMatch);
+    const firstMatch = preferGateway
+      ? (gatewayMatch ?? availableMatch)
+      : (availableMatch ?? gatewayMatch);
     if (firstMatch) return firstMatch;
   }
 
@@ -165,10 +169,7 @@ function resolveModel(registry: ModelRegistry, requested: string, cfg: PiAgentCo
   );
 }
 
-async function createPiSession(
-  projectRoot: string,
-  cfg: PiAgentConfig,
-): Promise<PiSessionSetup> {
+async function createPiSession(projectRoot: string, cfg: PiAgentConfig): Promise<PiSessionSetup> {
   const authStorage = createAuthStorage();
   configureRuntimeAuth(authStorage, cfg);
 

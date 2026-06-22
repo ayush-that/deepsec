@@ -139,10 +139,21 @@ program
     "--model <model>",
     "Model to use (default: claude-opus-4-8 for claude, gpt-5.5 for codex, zai/glm-5.2 for pi)",
   )
-  .option("--ai-provider <provider>", "Pi: provider to override for --ai-base-url / --ai-api-key-env (e.g. openai)")
-  .option("--ai-base-url <url>", "Pi: provider base URL override (e.g. a Martian/OpenAI-compatible gateway)")
+  .option(
+    "--ai-provider <provider>",
+    "Pi: provider to override for --ai-base-url / --ai-api-key-env (e.g. openai)",
+  )
+  .option(
+    "--ai-base-url <url>",
+    "Pi: provider base URL override (e.g. a Martian/OpenAI-compatible gateway)",
+  )
   .option("--ai-api-key-env <name>", "Pi: environment variable that holds the provider API key")
-  .option("--ai-header <name=value>", "Pi: extra provider request header; repeatable", collectRepeatable, [])
+  .option(
+    "--ai-header <name=value>",
+    "Pi: extra provider request header; repeatable",
+    collectRepeatable,
+    [],
+  )
   .option("--max-turns <n>", "Max conversation turns per batch (default: 150)", parseInt)
   .option(
     "--reinvestigate [n]",
@@ -203,10 +214,21 @@ program
     "--model <model>",
     "Model to use (default: claude-opus-4-8 for claude, gpt-5.5 for codex, zai/glm-5.2 for pi)",
   )
-  .option("--ai-provider <provider>", "Pi: provider to override for --ai-base-url / --ai-api-key-env (e.g. openai)")
-  .option("--ai-base-url <url>", "Pi: provider base URL override (e.g. a Martian/OpenAI-compatible gateway)")
+  .option(
+    "--ai-provider <provider>",
+    "Pi: provider to override for --ai-base-url / --ai-api-key-env (e.g. openai)",
+  )
+  .option(
+    "--ai-base-url <url>",
+    "Pi: provider base URL override (e.g. a Martian/OpenAI-compatible gateway)",
+  )
   .option("--ai-api-key-env <name>", "Pi: environment variable that holds the provider API key")
-  .option("--ai-header <name=value>", "Pi: extra provider request header; repeatable", collectRepeatable, [])
+  .option(
+    "--ai-header <name=value>",
+    "Pi: extra provider request header; repeatable",
+    collectRepeatable,
+    [],
+  )
   .option("--max-turns <n>", "Max conversation turns per batch (default: 150)", parseInt)
   .option(
     "--min-severity <sev>",

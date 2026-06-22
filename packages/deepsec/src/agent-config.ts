@@ -43,4 +43,3 @@ export function buildAgentConfig(opts: AgentRuntimeOpts): Record<string, unknown
   if (aiHeaders) config.aiHeaders = aiHeaders;
   return config;
 }
-
