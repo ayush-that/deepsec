@@ -47,6 +47,7 @@ const DEFAULT_MODEL = "zai/glm-5.2";
 const DEFAULT_THINKING_LEVEL = "xhigh";
 const DEFAULT_TOOLS = ["read", "grep", "find", "ls"];
 const GATEWAY_PROVIDER = "vercel-ai-gateway";
+const TOOL_ERROR_DETAIL_LIMIT = 500;
 
 const DEEPSEC_SYSTEM_NOTE =
   "You are running inside the Pi harness for deepsec. Use source inspection only. Do not run the target application, send network requests, or attempt exploitation. Return only the requested JSON object.";
@@ -409,6 +410,67 @@ function shortTarget(input: unknown): string | undefined {
   return undefined;
 }
 
+function compactOneLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function truncateLogDetail(value: string): string {
+  const compacted = compactOneLine(value);
+  if (compacted.length <= TOOL_ERROR_DETAIL_LIMIT) return compacted;
+  return `${compacted.slice(0, TOOL_ERROR_DETAIL_LIMIT)}...`;
+}
+
+function textFromToolContent(content: unknown): string | undefined {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return undefined;
+  const parts: string[] = [];
+  for (const item of content) {
+    if (typeof item === "string") {
+      parts.push(item);
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    if (typeof record.text === "string") parts.push(record.text);
+  }
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+function summarizeToolError(result: unknown): string | undefined {
+  if (!result) return undefined;
+  if (typeof result === "string") return truncateLogDetail(result);
+  if (result instanceof Error) return truncateLogDetail(result.message);
+  if (typeof result !== "object") return truncateLogDetail(String(result));
+
+  const record = result as Record<string, unknown>;
+  for (const key of ["error", "message", "reason", "stderr", "stdout"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return truncateLogDetail(value);
+    }
+  }
+
+  const contentText = textFromToolContent(record.content);
+  if (contentText) return truncateLogDetail(contentText);
+
+  try {
+    return truncateLogDetail(JSON.stringify(result));
+  } catch {
+    return undefined;
+  }
+}
+
+function formatToolErrorMessage(
+  toolName: string | undefined,
+  target: string | undefined,
+  result: unknown,
+): string {
+  const targetStr = target ? `: ${target}` : "";
+  const detail = summarizeToolError(result);
+  const detailStr = detail ? ` - ${detail}` : "";
+  return `Pi tool error: ${toolName ?? "tool"}${targetStr}${detailStr}`;
+}
+
 function batchMetaFromSession(session: AgentSession, durationMs: number): Partial<BatchMeta> {
   const stats = session.getSessionStats();
   return {
@@ -440,6 +502,7 @@ async function* runPiPrompt(params: {
   let promptError: unknown;
   let turnCount = 0;
   let toolUseCount = 0;
+  const toolTargets = new Map<string, string | undefined>();
 
   const wake = () => {
     const fn = notify;
@@ -468,6 +531,7 @@ async function* runPiPrompt(params: {
       case "tool_execution_start": {
         toolUseCount++;
         const target = shortTarget(e.args);
+        if (typeof e.toolCallId === "string") toolTargets.set(e.toolCallId, target);
         push({
           type: "tool_use",
           message: `${e.toolName ?? "tool"}${target ? `: ${target}` : ""}`,
@@ -477,11 +541,14 @@ async function* runPiPrompt(params: {
       }
       case "tool_execution_end":
         if (e.isError) {
+          const target =
+            typeof e.toolCallId === "string" ? toolTargets.get(e.toolCallId) : undefined;
           push({
             type: "error",
-            message: `Pi tool error: ${e.toolName ?? "tool"}`,
+            message: formatToolErrorMessage(e.toolName, target, e.result),
           });
         }
+        if (typeof e.toolCallId === "string") toolTargets.delete(e.toolCallId);
         break;
       case "auto_retry_start":
         push({
