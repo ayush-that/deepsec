@@ -1,14 +1,10 @@
-export interface AgentRuntimeOpts {
+interface AgentRuntimeOpts {
   model?: string;
   maxTurns?: number;
   aiProvider?: string;
   aiBaseUrl?: string;
   aiApiKeyEnv?: string;
   aiHeader?: string[];
-}
-
-export interface AgentCredentialOpts {
-  aiApiKeyEnv?: string;
 }
 
 export function collectRepeatable(value: string, previous: string[] = []): string[] {
