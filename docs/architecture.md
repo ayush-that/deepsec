@@ -1,4 +1,7 @@
-# Architecture
+---
+title: "Architecture"
+description: "Follow the append-only pipeline from scan to process, revalidate, enrich, report, and export."
+---
 
 ## Pipeline
 

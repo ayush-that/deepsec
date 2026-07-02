@@ -1,4 +1,7 @@
-# Models
+---
+title: "Models"
+description: "Choose Codex, Claude, or Pi for process and revalidate runs, and compare models under the same workload."
+---
 
 deepsec talks to LLMs through interchangeable agent backends:
 

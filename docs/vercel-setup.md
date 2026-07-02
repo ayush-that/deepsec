@@ -1,4 +1,7 @@
-# Setting up AI Gateway and Vercel Sandbox
+---
+title: "Setting up AI Gateway and Vercel Sandbox"
+description: "Use AI Gateway for model access and Vercel Sandbox for distributed scans across microVMs."
+---
 
 deepsec uses two Vercel products. Most people only need the first.
 

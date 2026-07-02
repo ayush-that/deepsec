@@ -1,4 +1,7 @@
-# Configuration reference
+---
+title: "Configuration reference"
+description: "Configure projects, matchers, agents, ownership, and runtime environment values in deepsec.config.ts."
+---
 
 deepsec reads `deepsec.config.{ts,mjs,js,cjs}` from the current working
 directory, walking up. The CLI inherits whatever the file declares.

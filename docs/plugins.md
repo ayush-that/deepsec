@@ -1,4 +1,7 @@
-# Plugins
+---
+title: "Plugins"
+description: "Extend deepsec with matchers, ownership providers, notifiers, agents, and remote executors."
+---
 
 A deepsec plugin can fill any of five slots:
 

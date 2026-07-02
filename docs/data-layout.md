@@ -1,4 +1,7 @@
-# Data layout
+---
+title: "Data layout"
+description: "The on-disk state deepsec writes for projects, files, runs, findings, and exports."
+---
 
 `data/` is deepsec's on-disk state. Each project owns a subdirectory; the
 files inside are append-only across runs.
@@ -50,7 +53,7 @@ Free-form markdown injected into the AI prompt for `process`,
 [getting-started.md](getting-started.md) for the agent prompt that
 writes a good one.
 
-## files/<path>.json — `FileRecord`
+## `files/<path>.json` — FileRecord
 
 The core per-file accumulator. Every stage *adds to* this record;
 nothing is overwritten. Re-scanning merges new candidates.
@@ -174,7 +177,7 @@ analyzed    -- AnalysisEntry appended; findings updated
 `error` is set if the agent crashed mid-investigation. Re-running
 `process` will retry `error` and `pending` files.
 
-## runs/<runId>.json — `RunMeta`
+## `runs/<runId>.json` — RunMeta
 
 One per `scan` / `process` / `revalidate` invocation. Used for status
 reporting (`deepsec status`) and for filtering exports by run.

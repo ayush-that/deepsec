@@ -1,4 +1,7 @@
-# Getting started
+---
+title: "Getting started"
+description: "Install deepsec in a .deepsec workspace, fill in INFO.md, and run a limited scan before a full review."
+---
 
 ## Install
 

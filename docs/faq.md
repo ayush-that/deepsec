@@ -1,4 +1,7 @@
-# FAQ
+---
+title: "FAQ"
+description: "Installation, credentials, costs, CI, state handling, and common operating questions."
+---
 
 ## How should I install deepsec?
 

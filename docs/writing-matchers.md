@@ -1,4 +1,7 @@
-# Writing matchers with your coding agent
+---
+title: "Writing matchers with your coding agent"
+description: "Add project-specific matchers for routes, RPC surfaces, auth helpers, webhooks, and internal frameworks."
+---
 
 This doc is for users running deepsec inside a `.deepsec/` workspace —
 i.e. you ran `npx deepsec init`, deepsec is installed in
