@@ -28,9 +28,7 @@ const docsPage = createDocsPage({
   mdx: ({ link }) => {
     const DocsLink = (link ?? "a") as ElementType;
     return getMDXComponents({
-      a: (props: ComponentProps<"a">) => (
-        <DocsLink {...props} href={resolveDocHref(props.href)} />
-      ),
+      a: (props: ComponentProps<"a">) => <DocsLink {...props} href={resolveDocHref(props.href)} />,
     });
   },
   source: geistdocsSource,
@@ -44,11 +42,7 @@ const docsPage = createDocsPage({
 // segment (hideLocale: "default-locale"), so pin lang instead of routing it.
 type PageParams = { slug: string[] };
 
-export default function Page({
-  params,
-}: {
-  params: Promise<PageParams>;
-}) {
+export default function Page({ params }: { params: Promise<PageParams> }) {
   return docsPage.Page({
     params: params.then(({ slug }) => ({ lang: "en", slug })),
   });
@@ -61,11 +55,7 @@ export function generateStaticParams() {
     .map(({ slug }) => ({ slug: slug as string[] }));
 }
 
-export function generateMetadata({
-  params,
-}: {
-  params: Promise<PageParams>;
-}) {
+export function generateMetadata({ params }: { params: Promise<PageParams> }) {
   return docsPage.generateMetadata({
     params: params.then(({ slug }) => ({ lang: "en", slug })),
   });

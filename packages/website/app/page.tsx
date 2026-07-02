@@ -114,21 +114,16 @@ export default function Home() {
                 Find the vulnerabilities that already shipped.
               </h1>
               <p className="mt-7 max-w-2xl text-lg leading-8 text-gray-900 sm:text-xl sm:leading-9">
-                deepsec runs coding agents over your entire repository, in your
-                own infrastructure. It reads old routes, background jobs,
-                internal APIs, and everything else that merged before
-                today&apos;s models existed and that pull request review will
-                never look at again.
+                deepsec runs coding agents over your entire repository, in your own infrastructure.
+                It reads old routes, background jobs, internal APIs, and everything else that merged
+                before today&apos;s models existed and that pull request review will never look at
+                again.
               </p>
               <div
                 id="get-started"
                 className="mt-8 flex w-full max-w-2xl flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-center"
               >
-                <Button
-                  asChild
-                  className="w-full shadow-none sm:w-auto"
-                  size="lg"
-                >
+                <Button asChild className="w-full shadow-none sm:w-auto" size="lg">
                   <a href="#docs">Start a scan</a>
                 </Button>
                 <Button
@@ -171,13 +166,10 @@ $ pnpm deepsec revalidate --min-severity HIGH
                 </div>
                 <div className="grid grid-rows-[auto_1fr]">
                   <div className="border-b border-gray-alpha-400 p-5 sm:p-6">
-                    <p className="text-sm font-medium text-gray-1000">
-                      Why it finds more
-                    </p>
+                    <p className="text-sm font-medium text-gray-1000">Why it finds more</p>
                     <p className="mt-3 text-sm leading-6 text-gray-900">
-                      The model reads your actual source, your framework
-                      structure, and your notes about the project. An external
-                      pentest starts with none of that.
+                      The model reads your actual source, your framework structure, and your notes
+                      about the project. An external pentest starts with none of that.
                     </p>
                   </div>
                   <div className="p-5 sm:p-6">
@@ -205,9 +197,7 @@ $ pnpm deepsec revalidate --min-severity HIGH
         <section id="why" className="border-b border-gray-alpha-400">
           <div className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
             <div className="max-w-2xl">
-              <p className="text-sm font-medium text-gray-800">
-                Why full-repo review
-              </p>
+              <p className="text-sm font-medium text-gray-800">Why full-repo review</p>
               <h2 className="mt-3 text-3xl font-semibold leading-tight sm:text-5xl">
                 Most security debt is already merged.
               </h2>
@@ -216,9 +206,7 @@ $ pnpm deepsec revalidate --min-severity HIGH
               {reasons.map((reason) => (
                 <article key={reason.title} className="bg-background-100 p-6">
                   <h3 className="text-xl font-semibold">{reason.title}</h3>
-                  <p className="mt-4 text-sm leading-6 text-gray-900">
-                    {reason.body}
-                  </p>
+                  <p className="mt-4 text-sm leading-6 text-gray-900">{reason.body}</p>
                 </article>
               ))}
             </div>
@@ -233,27 +221,20 @@ $ pnpm deepsec revalidate --min-severity HIGH
                 Four commands from checkout to confirmed findings.
               </h2>
               <p className="mt-5 max-w-md text-base leading-7 text-gray-900">
-                Cheap regex indexing decides where the models look, so the
-                expensive agent time goes to code that can actually be
-                vulnerable. Important findings are rechecked before they leave
-                the tool.
+                Cheap regex indexing decides where the models look, so the expensive agent time goes
+                to code that can actually be vulnerable. Important findings are rechecked before
+                they leave the tool.
               </p>
             </div>
             <div className="grid gap-px border border-gray-alpha-400 bg-gray-alpha-400 sm:grid-cols-2">
               {workflow.map((step, index) => (
                 <article key={step.label} className="bg-background-100 p-6">
                   <div className="flex items-center justify-between">
-                    <p className="font-mono text-sm text-gray-800">
-                      {step.label}
-                    </p>
-                    <span className="font-mono text-xs text-gray-700">
-                      0{index + 1}
-                    </span>
+                    <p className="font-mono text-sm text-gray-800">{step.label}</p>
+                    <span className="font-mono text-xs text-gray-700">0{index + 1}</span>
                   </div>
                   <h3 className="mt-10 text-xl font-semibold">{step.title}</h3>
-                  <p className="mt-3 text-sm leading-6 text-gray-900">
-                    {step.body}
-                  </p>
+                  <p className="mt-3 text-sm leading-6 text-gray-900">{step.body}</p>
                 </article>
               ))}
             </div>
@@ -263,9 +244,7 @@ $ pnpm deepsec revalidate --min-severity HIGH
         <section id="fit" className="border-b border-gray-alpha-400">
           <div className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
             <div className="max-w-2xl">
-              <p className="text-sm font-medium text-gray-800">
-                Ways to run it
-              </p>
+              <p className="text-sm font-medium text-gray-800">Ways to run it</p>
               <h2 className="mt-3 text-3xl font-semibold leading-tight sm:text-5xl">
                 One-off audit, CI gate, or a standing review of a monorepo.
               </h2>
@@ -275,9 +254,7 @@ $ pnpm deepsec revalidate --min-severity HIGH
                 <article key={item.title} className="bg-background-100 p-6">
                   <p className="font-mono text-xs text-gray-800">{item.tag}</p>
                   <h3 className="mt-10 text-lg font-semibold">{item.title}</h3>
-                  <p className="mt-3 text-sm leading-6 text-gray-900">
-                    {item.body}
-                  </p>
+                  <p className="mt-3 text-sm leading-6 text-gray-900">{item.body}</p>
                 </article>
               ))}
             </div>
@@ -287,18 +264,15 @@ $ pnpm deepsec revalidate --min-severity HIGH
         <section id="coverage" className="border-b border-gray-alpha-400 bg-background-200">
           <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:px-8 lg:py-24">
             <div>
-              <p className="text-sm font-medium text-gray-800">
-                Source context
-              </p>
+              <p className="text-sm font-medium text-gray-800">Source context</p>
               <h2 className="mt-3 text-3xl font-semibold leading-tight sm:text-5xl">
                 Built-in coverage for common frameworks.
               </h2>
               <p className="mt-5 max-w-lg text-base leading-7 text-gray-900">
-                deepsec ships with matchers for the entry points of common web
-                frameworks and infrastructure files, and sends the model small
-                batches of related files with project context attached. If your
-                stack has internal conventions, you can add your own matchers
-                instead of waiting for a generic scanner to learn them.
+                deepsec ships with matchers for the entry points of common web frameworks and
+                infrastructure files, and sends the model small batches of related files with
+                project context attached. If your stack has internal conventions, you can add your
+                own matchers instead of waiting for a generic scanner to learn them.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-px border border-gray-alpha-400 bg-gray-alpha-400 sm:grid-cols-3">
@@ -332,18 +306,12 @@ $ pnpm deepsec revalidate --min-severity HIGH
                   Run a small scan first.
                 </h2>
                 <p className="mt-5 max-w-xl text-base leading-7 text-gray-900">
-                  deepsec uses strong models at high thinking budgets, so a full
-                  scan of a large repository costs real money. Start with a
-                  limited pass, read the findings, and scale up once you trust
-                  the output.
+                  deepsec uses strong models at high thinking budgets, so a full scan of a large
+                  repository costs real money. Start with a limited pass, read the findings, and
+                  scale up once you trust the output.
                 </p>
               </div>
-              <Button
-                asChild
-                className="shadow-none"
-                size="lg"
-                variant="outline"
-              >
+              <Button asChild className="shadow-none" size="lg" variant="outline">
                 <Link href={docsUrl}>Open docs</Link>
               </Button>
             </div>
@@ -355,12 +323,8 @@ $ pnpm deepsec revalidate --min-severity HIGH
                   className="group bg-background-100 p-6 transition-colors hover:bg-background-200"
                 >
                   <p className="font-mono text-xs text-gray-800">{doc.tag}</p>
-                  <h3 className="mt-8 text-xl font-semibold group-hover:underline">
-                    {doc.title}
-                  </h3>
-                  <p className="mt-3 text-sm leading-6 text-gray-900">
-                    {doc.summary}
-                  </p>
+                  <h3 className="mt-8 text-xl font-semibold group-hover:underline">{doc.title}</h3>
+                  <p className="mt-3 text-sm leading-6 text-gray-900">{doc.summary}</p>
                 </Link>
               ))}
             </div>
@@ -371,19 +335,13 @@ $ pnpm deepsec revalidate --min-severity HIGH
   );
 }
 
-function ComparisonRow({
-  item,
-}: {
-  item: { label: string; review: string; deepsec: string };
-}) {
+function ComparisonRow({ item }: { item: { label: string; review: string; deepsec: string } }) {
   return (
     <>
       <div className="border-r border-t border-gray-alpha-400 p-3 font-mono text-xs text-gray-800">
         {item.label}
       </div>
-      <div className="border-r border-t border-gray-alpha-400 p-3 text-gray-900">
-        {item.review}
-      </div>
+      <div className="border-r border-t border-gray-alpha-400 p-3 text-gray-900">{item.review}</div>
       <div className="border-t border-gray-alpha-400 p-3 font-medium text-gray-1000">
         {item.deepsec}
       </div>
