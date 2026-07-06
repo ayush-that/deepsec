@@ -8,7 +8,7 @@ export const github = {
   editPath: "docs/{path}",
 };
 
-export const nav = [
+const nav = [
   {
     label: "Why full-repo",
     href: "/#why",
@@ -28,14 +28,14 @@ export const nav = [
   },
 ];
 
-export const suggestions = [
+const suggestions = [
   "How do I run my first deepsec scan?",
   "How does deepsec resume interrupted runs?",
   "How do I review only PR changes?",
   "How do custom matchers work?",
 ];
 
-export function DeepsecLogo({ mark = true }: { mark?: boolean }) {
+function DeepsecLogo({ mark = true }: { mark?: boolean }) {
   return (
     <span className="flex items-center gap-2 text-gray-1000">
       {mark ? (

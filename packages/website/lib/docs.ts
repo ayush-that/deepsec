@@ -1,6 +1,6 @@
 import { source } from "@/lib/geistdocs/source";
 
-export type FeaturedDoc = {
+type FeaturedDoc = {
   title: string;
   summary: string;
   tag: string;

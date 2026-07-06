@@ -8,5 +8,3 @@ export const geistdocsSource = createSource({
 });
 
 export const source = geistdocsSource.source;
-export const getPageImage = geistdocsSource.getPageImage;
-export const getLLMText = geistdocsSource.getPageMarkdown;
