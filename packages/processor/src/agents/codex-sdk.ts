@@ -310,13 +310,23 @@ function buildCodexInvocation(): CodexInvocation {
     if (!process.env.RUST_LOG) extras.RUST_LOG = "info";
   }
 
+  // Codex 0.143+ enables remote_plugin by default. Deepsec never wants
+  // marketplace/plugin installs during investigate/revalidate — pin off
+  // for both subscription and gateway modes.
+  const pluginLockdown = {
+    features: {
+      plugins: false,
+      remote_plugin: false,
+    },
+  };
+
   if (subscriptionHome) {
     // No credentials enter the codex env in subscription mode — auth
     // happens via the mirrored auth.json. The allowlist already drops
     // OPENAI_API_KEY/ANTHROPIC_AUTH_TOKEN/_BASE_URL, so no explicit
     // delete is needed.
     const env = buildCodexEnv(extras);
-    const options: CodexOptions = { env };
+    const options: CodexOptions = { env, config: pluginLockdown };
     if (codexPathOverride) options.codexPathOverride = codexPathOverride;
     return { options, stderrLog, codexHome };
   }
@@ -342,6 +352,7 @@ function buildCodexInvocation(): CodexInvocation {
   }
 
   const config = {
+    ...pluginLockdown,
     model_provider: CUSTOM_PROVIDER_ID,
     model_providers: {
       [CUSTOM_PROVIDER_ID]: providerConfig,

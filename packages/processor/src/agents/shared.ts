@@ -50,7 +50,7 @@ export type QuotaAgentHint = "claude" | "codex";
  * Patterns below were extracted from the actual platform binaries via
  * `strings`:
  *   - Claude: `@anthropic-ai/claude-agent-sdk-darwin-arm64/claude`
- *   - Codex:  `@openai/codex/vendor/.../codex/codex`
+ *   - Codex:  `@openai/codex/vendor/.../bin/codex`
  * plus the well-known stable strings from the upstream HTTP error
  * envelopes (Anthropic `billing_error`, OpenAI `insufficient_quota` /
  * "You exceeded your current quota") which don't appear in the bundled

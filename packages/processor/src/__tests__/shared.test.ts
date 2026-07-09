@@ -45,7 +45,7 @@ describe("isTransientError", () => {
 describe("classifyQuotaError", () => {
   // Strings in this block were extracted from the actual platform binaries
   // shipped via @anthropic-ai/claude-agent-sdk-darwin-arm64 (claude) and
-  // @openai/codex/vendor/.../codex/codex (codex Rust binary), via
+  // @openai/codex/vendor/.../bin/codex (codex Rust binary), via
   // `strings | grep`. Treat these tests as ground truth — if a binary
   // upgrade breaks them, the regexes need updating.
 
