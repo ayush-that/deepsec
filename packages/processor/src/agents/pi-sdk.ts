@@ -404,11 +404,7 @@ function createAuthStorage(): AuthStorage {
   return fs.existsSync(authPath) ? AuthStorage.create(authPath) : AuthStorage.inMemory();
 }
 
-export function resolvePiModel(
-  registry: ModelRegistry,
-  requested: string,
-  cfg: PiAgentConfig,
-): PiModel {
+function resolvePiModel(registry: ModelRegistry, requested: string, cfg: PiAgentConfig): PiModel {
   const preferGateway = Boolean(isUsingAiGateway() && !cfg.aiBaseUrl && !cfg.aiProvider);
   if (preferGateway) {
     const gatewayModel = registry.find(GATEWAY_PROVIDER, stripGatewayProviderPrefix(requested));
