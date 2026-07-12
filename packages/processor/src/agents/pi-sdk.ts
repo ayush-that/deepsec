@@ -51,6 +51,8 @@ const DEFAULT_MODEL = "zai/glm-5.2";
 const DEFAULT_THINKING_LEVEL = "xhigh";
 const DEFAULT_TOOLS = ["read", "grep", "find", "ls"];
 const GATEWAY_PROVIDER = "vercel-ai-gateway";
+const GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh/v1";
+const GATEWAY_MODELS_URL = `${GATEWAY_BASE_URL}/models`;
 const TOOL_ERROR_DETAIL_LIMIT = 500;
 
 const DEEPSEC_SYSTEM_NOTE =
@@ -68,6 +70,27 @@ interface PiAgentConfig {
 }
 
 type PiModel = ReturnType<ModelRegistry["getAll"]>[number];
+type PiProviderConfig = Parameters<ModelRegistry["registerProvider"]>[1];
+type PiProviderModelConfig = NonNullable<PiProviderConfig["models"]>[number];
+
+interface GatewayModelCatalog {
+  data?: unknown;
+}
+
+interface GatewayModelMetadata {
+  id: string;
+  name?: string;
+  context_window?: number;
+  max_tokens?: number;
+  type?: string;
+  tags?: unknown;
+  pricing?: {
+    input?: string | number;
+    output?: string | number;
+    input_cache_read?: string | number;
+    input_cache_write?: string | number;
+  };
+}
 
 interface PiSessionSetup {
   session: AgentSession;
@@ -274,6 +297,17 @@ function modelProviderFromName(modelName: string | undefined): string | undefine
   return modelName.slice(0, slash);
 }
 
+function stripGatewayProviderPrefix(modelName: string): string {
+  const prefix = `${GATEWAY_PROVIDER}/`;
+  return modelName.startsWith(prefix) ? modelName.slice(prefix.length) : modelName;
+}
+
+function isGatewayModelRequest(requested: string, cfg: PiAgentConfig): boolean {
+  return Boolean(
+    process.env.AI_GATEWAY_API_KEY && !cfg.aiBaseUrl && !cfg.aiProvider && requested.includes("/"),
+  );
+}
+
 function configureRuntimeAuth(authStorage: AuthStorage, cfg: PiAgentConfig): void {
   const gatewayKey = process.env.AI_GATEWAY_API_KEY;
   if (gatewayKey) authStorage.setRuntimeApiKey(GATEWAY_PROVIDER, gatewayKey);
@@ -309,17 +343,119 @@ function configureProviderOverrides(registry: ModelRegistry, cfg: PiAgentConfig)
   }
 }
 
+function numberFromGatewayValue(value: string | number | undefined, fallback = 0): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed * 1_000_000 : fallback;
+  }
+  return fallback;
+}
+
+function isGatewayModelMetadata(value: unknown): value is GatewayModelMetadata {
+  if (!value || typeof value !== "object") return false;
+  const model = value as GatewayModelMetadata;
+  return typeof model.id === "string" && model.id.includes("/");
+}
+
+function gatewayModelToPiModel(model: GatewayModelMetadata): PiProviderModelConfig | undefined {
+  if (model.type && model.type !== "language") return undefined;
+  const tags = Array.isArray(model.tags) ? model.tags : [];
+  return {
+    id: model.id,
+    name: model.name ?? model.id,
+    api: "openai-completions",
+    reasoning: tags.includes("reasoning"),
+    input: tags.includes("vision") || tags.includes("file-input") ? ["text", "image"] : ["text"],
+    cost: {
+      input: numberFromGatewayValue(model.pricing?.input),
+      output: numberFromGatewayValue(model.pricing?.output),
+      cacheRead: numberFromGatewayValue(model.pricing?.input_cache_read),
+      cacheWrite: numberFromGatewayValue(model.pricing?.input_cache_write),
+    },
+    contextWindow: model.context_window ?? 128_000,
+    maxTokens: model.max_tokens ?? 32_000,
+  };
+}
+
+async function fetchGatewayModels(signal?: AbortSignal): Promise<PiProviderModelConfig[]> {
+  const response = await fetch(GATEWAY_MODELS_URL, {
+    headers: { Authorization: `Bearer ${process.env.AI_GATEWAY_API_KEY ?? ""}` },
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(`AI Gateway model catalog request failed: HTTP ${response.status}`);
+  }
+  const catalog = (await response.json()) as GatewayModelCatalog;
+  const models = Array.isArray(catalog.data) ? catalog.data : [];
+  return models
+    .filter(isGatewayModelMetadata)
+    .map(gatewayModelToPiModel)
+    .filter((model): model is PiProviderModelConfig => Boolean(model));
+}
+
+function piModelToProviderModelConfig(model: PiModel): PiProviderModelConfig {
+  return {
+    id: model.id,
+    name: model.name,
+    api: model.api,
+    reasoning: model.reasoning,
+    thinkingLevelMap: model.thinkingLevelMap,
+    input: model.input,
+    cost: model.cost,
+    contextWindow: model.contextWindow,
+    maxTokens: model.maxTokens,
+    compat: model.compat,
+  };
+}
+
+function dedupeProviderModels(models: PiProviderModelConfig[]): PiProviderModelConfig[] {
+  const byId = new Map<string, PiProviderModelConfig>();
+  for (const model of models) byId.set(model.id, model);
+  return Array.from(byId.values());
+}
+
+async function hydrateGatewayModelsIfNeeded(
+  registry: ModelRegistry,
+  requested: string,
+  cfg: PiAgentConfig,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!isGatewayModelRequest(requested, cfg)) return;
+  const gatewayModelId = stripGatewayProviderPrefix(requested);
+  if (registry.find(GATEWAY_PROVIDER, gatewayModelId)) return;
+
+  const gatewayModels = await fetchGatewayModels(signal);
+  const existingGatewayModels = registry
+    .getAll()
+    .filter((model) => model.provider === GATEWAY_PROVIDER)
+    .map(piModelToProviderModelConfig);
+  const models = dedupeProviderModels([...existingGatewayModels, ...gatewayModels]);
+  if (!models.some((model) => model.id === gatewayModelId)) return;
+
+  registry.registerProvider(GATEWAY_PROVIDER, {
+    baseUrl: GATEWAY_BASE_URL,
+    apiKey: "$AI_GATEWAY_API_KEY",
+    api: "openai-completions",
+    models,
+  });
+}
+
 function createAuthStorage(): AuthStorage {
   const authPath = path.join(getAgentDir(), "auth.json");
   return fs.existsSync(authPath) ? AuthStorage.create(authPath) : AuthStorage.inMemory();
 }
 
-function resolveModel(registry: ModelRegistry, requested: string, cfg: PiAgentConfig): PiModel {
+export function resolvePiModel(
+  registry: ModelRegistry,
+  requested: string,
+  cfg: PiAgentConfig,
+): PiModel {
   const preferGateway = Boolean(
     process.env.AI_GATEWAY_API_KEY && !cfg.aiBaseUrl && !cfg.aiProvider,
   );
   if (preferGateway) {
-    const gatewayModel = registry.find(GATEWAY_PROVIDER, requested);
+    const gatewayModel = registry.find(GATEWAY_PROVIDER, stripGatewayProviderPrefix(requested));
     if (gatewayModel) return gatewayModel;
   }
 
@@ -327,11 +463,12 @@ function resolveModel(registry: ModelRegistry, requested: string, cfg: PiAgentCo
   if (slash > 0) {
     const provider = requested.slice(0, slash);
     const modelId = requested.slice(slash + 1);
-    const direct = registry.find(provider, modelId);
-    if (direct) return direct;
-
     const gatewayModel = registry.find(GATEWAY_PROVIDER, requested);
     if (gatewayModel) return gatewayModel;
+
+    const direct = registry.find(provider, modelId);
+    if (direct && !preferGateway) return direct;
+    if (direct && registry.hasConfiguredAuth(direct)) return direct;
   } else {
     const matches = registry.getAll().filter((m) => m.id === requested);
     const gatewayMatch = matches.find((m) => m.provider === GATEWAY_PROVIDER);
@@ -352,7 +489,29 @@ function resolveModel(registry: ModelRegistry, requested: string, cfg: PiAgentCo
   );
 }
 
-async function createPiSession(projectRoot: string, cfg: PiAgentConfig): Promise<PiSessionSetup> {
+export async function resolvePiModelWithDynamicGateway(
+  registry: ModelRegistry,
+  requested: string,
+  cfg: PiAgentConfig,
+  signal?: AbortSignal,
+): Promise<PiModel> {
+  try {
+    return resolvePiModel(registry, requested, cfg);
+  } catch (err) {
+    await hydrateGatewayModelsIfNeeded(registry, requested, cfg, signal);
+    try {
+      return resolvePiModel(registry, requested, cfg);
+    } catch {
+      throw err;
+    }
+  }
+}
+
+async function createPiSession(
+  projectRoot: string,
+  cfg: PiAgentConfig,
+  signal?: AbortSignal,
+): Promise<PiSessionSetup> {
   const authStorage = createAuthStorage();
   configureRuntimeAuth(authStorage, cfg);
 
@@ -360,7 +519,7 @@ async function createPiSession(projectRoot: string, cfg: PiAgentConfig): Promise
   configureProviderOverrides(modelRegistry, cfg);
 
   const modelName = cfg.model ?? DEFAULT_MODEL;
-  const model = resolveModel(modelRegistry, modelName, cfg);
+  const model = await resolvePiModelWithDynamicGateway(modelRegistry, modelName, cfg, signal);
   const agentDir = getAgentDir();
   const settingsManager = SettingsManager.inMemory({
     defaultThinkingLevel: (cfg.thinkingLevel ?? DEFAULT_THINKING_LEVEL) as never,
@@ -690,7 +849,7 @@ export class PiAgentPlugin implements AgentPlugin {
       }
 
       try {
-        const setup = await createPiSession(projectRoot, cfg);
+        const setup = await createPiSession(projectRoot, cfg, signal);
         session = setup.session;
         modelLabel = setup.modelLabel;
         if (attempt === 1) {
@@ -841,7 +1000,7 @@ export class PiAgentPlugin implements AgentPlugin {
       }
 
       try {
-        const setup = await createPiSession(projectRoot, cfg);
+        const setup = await createPiSession(projectRoot, cfg, signal);
         session = setup.session;
         modelLabel = setup.modelLabel;
         if (attempt === 1) {
