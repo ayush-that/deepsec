@@ -26,6 +26,7 @@ import {
   classifyQuotaError,
   formatJsonRepairFailureDebugText,
   isTransientError,
+  isUsingAiGateway,
   jsonRepairFailureError,
   MAX_ATTEMPTS,
   parseInvestigateResults,
@@ -52,7 +53,6 @@ const DEFAULT_THINKING_LEVEL = "xhigh";
 const DEFAULT_TOOLS = ["read", "grep", "find", "ls"];
 const GATEWAY_PROVIDER = "vercel-ai-gateway";
 const GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh/v1";
-const GATEWAY_MODELS_URL = `${GATEWAY_BASE_URL}/models`;
 const TOOL_ERROR_DETAIL_LIMIT = 500;
 
 const DEEPSEC_SYSTEM_NOTE =
@@ -72,25 +72,6 @@ interface PiAgentConfig {
 type PiModel = ReturnType<ModelRegistry["getAll"]>[number];
 type PiProviderConfig = Parameters<ModelRegistry["registerProvider"]>[1];
 type PiProviderModelConfig = NonNullable<PiProviderConfig["models"]>[number];
-
-interface GatewayModelCatalog {
-  data?: unknown;
-}
-
-interface GatewayModelMetadata {
-  id: string;
-  name?: string;
-  context_window?: number;
-  max_tokens?: number;
-  type?: string;
-  tags?: unknown;
-  pricing?: {
-    input?: string | number;
-    output?: string | number;
-    input_cache_read?: string | number;
-    input_cache_write?: string | number;
-  };
-}
 
 interface PiSessionSetup {
   session: AgentSession;
@@ -304,12 +285,22 @@ function stripGatewayProviderPrefix(modelName: string): string {
 
 function isGatewayModelRequest(requested: string, cfg: PiAgentConfig): boolean {
   return Boolean(
-    process.env.AI_GATEWAY_API_KEY && !cfg.aiBaseUrl && !cfg.aiProvider && requested.includes("/"),
+    isUsingAiGateway() && !cfg.aiBaseUrl && !cfg.aiProvider && requested.includes("/"),
+  );
+}
+
+function getGatewayCredential(): string | undefined {
+  return (
+    process.env.AI_GATEWAY_API_KEY ??
+    process.env.VERCEL_OIDC_TOKEN ??
+    process.env.OPENAI_API_KEY ??
+    process.env.ANTHROPIC_AUTH_TOKEN ??
+    process.env.ANTHROPIC_API_KEY
   );
 }
 
 function configureRuntimeAuth(authStorage: AuthStorage, cfg: PiAgentConfig): void {
-  const gatewayKey = process.env.AI_GATEWAY_API_KEY;
+  const gatewayKey = getGatewayCredential();
   if (gatewayKey) authStorage.setRuntimeApiKey(GATEWAY_PROVIDER, gatewayKey);
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN;
@@ -343,55 +334,22 @@ function configureProviderOverrides(registry: ModelRegistry, cfg: PiAgentConfig)
   }
 }
 
-function numberFromGatewayValue(value: string | number | undefined, fallback = 0): number {
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed * 1_000_000 : fallback;
-  }
-  return fallback;
-}
-
-function isGatewayModelMetadata(value: unknown): value is GatewayModelMetadata {
-  if (!value || typeof value !== "object") return false;
-  const model = value as GatewayModelMetadata;
-  return typeof model.id === "string" && model.id.includes("/");
-}
-
-function gatewayModelToPiModel(model: GatewayModelMetadata): PiProviderModelConfig | undefined {
-  if (model.type && model.type !== "language") return undefined;
-  const tags = Array.isArray(model.tags) ? model.tags : [];
+function createGatewayPassThroughModel(modelId: string): PiProviderModelConfig {
   return {
-    id: model.id,
-    name: model.name ?? model.id,
+    id: modelId,
+    name: modelId,
     api: "openai-completions",
-    reasoning: tags.includes("reasoning"),
-    input: tags.includes("vision") || tags.includes("file-input") ? ["text", "image"] : ["text"],
+    reasoning: true,
+    input: ["text", "image"],
     cost: {
-      input: numberFromGatewayValue(model.pricing?.input),
-      output: numberFromGatewayValue(model.pricing?.output),
-      cacheRead: numberFromGatewayValue(model.pricing?.input_cache_read),
-      cacheWrite: numberFromGatewayValue(model.pricing?.input_cache_write),
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
     },
-    contextWindow: model.context_window ?? 128_000,
-    maxTokens: model.max_tokens ?? 32_000,
+    contextWindow: 128_000,
+    maxTokens: 32_000,
   };
-}
-
-async function fetchGatewayModels(signal?: AbortSignal): Promise<PiProviderModelConfig[]> {
-  const response = await fetch(GATEWAY_MODELS_URL, {
-    headers: { Authorization: `Bearer ${process.env.AI_GATEWAY_API_KEY ?? ""}` },
-    signal,
-  });
-  if (!response.ok) {
-    throw new Error(`AI Gateway model catalog request failed: HTTP ${response.status}`);
-  }
-  const catalog = (await response.json()) as GatewayModelCatalog;
-  const models = Array.isArray(catalog.data) ? catalog.data : [];
-  return models
-    .filter(isGatewayModelMetadata)
-    .map(gatewayModelToPiModel)
-    .filter((model): model is PiProviderModelConfig => Boolean(model));
 }
 
 function piModelToProviderModelConfig(model: PiModel): PiProviderModelConfig {
@@ -415,27 +373,27 @@ function dedupeProviderModels(models: PiProviderModelConfig[]): PiProviderModelC
   return Array.from(byId.values());
 }
 
-async function hydrateGatewayModelsIfNeeded(
+function registerGatewayModelIfNeeded(
   registry: ModelRegistry,
   requested: string,
   cfg: PiAgentConfig,
-  signal?: AbortSignal,
-): Promise<void> {
+): void {
   if (!isGatewayModelRequest(requested, cfg)) return;
   const gatewayModelId = stripGatewayProviderPrefix(requested);
   if (registry.find(GATEWAY_PROVIDER, gatewayModelId)) return;
 
-  const gatewayModels = await fetchGatewayModels(signal);
   const existingGatewayModels = registry
     .getAll()
     .filter((model) => model.provider === GATEWAY_PROVIDER)
     .map(piModelToProviderModelConfig);
-  const models = dedupeProviderModels([...existingGatewayModels, ...gatewayModels]);
-  if (!models.some((model) => model.id === gatewayModelId)) return;
+  const models = dedupeProviderModels([
+    ...existingGatewayModels,
+    createGatewayPassThroughModel(gatewayModelId),
+  ]);
 
   registry.registerProvider(GATEWAY_PROVIDER, {
     baseUrl: GATEWAY_BASE_URL,
-    apiKey: "$AI_GATEWAY_API_KEY",
+    apiKey: getGatewayCredential() ?? "$AI_GATEWAY_API_KEY",
     api: "openai-completions",
     models,
   });
@@ -451,9 +409,7 @@ export function resolvePiModel(
   requested: string,
   cfg: PiAgentConfig,
 ): PiModel {
-  const preferGateway = Boolean(
-    process.env.AI_GATEWAY_API_KEY && !cfg.aiBaseUrl && !cfg.aiProvider,
-  );
+  const preferGateway = Boolean(isUsingAiGateway() && !cfg.aiBaseUrl && !cfg.aiProvider);
   if (preferGateway) {
     const gatewayModel = registry.find(GATEWAY_PROVIDER, stripGatewayProviderPrefix(requested));
     if (gatewayModel) return gatewayModel;
@@ -493,12 +449,11 @@ export async function resolvePiModelWithDynamicGateway(
   registry: ModelRegistry,
   requested: string,
   cfg: PiAgentConfig,
-  signal?: AbortSignal,
 ): Promise<PiModel> {
   try {
     return resolvePiModel(registry, requested, cfg);
   } catch (err) {
-    await hydrateGatewayModelsIfNeeded(registry, requested, cfg, signal);
+    registerGatewayModelIfNeeded(registry, requested, cfg);
     try {
       return resolvePiModel(registry, requested, cfg);
     } catch {
@@ -507,11 +462,7 @@ export async function resolvePiModelWithDynamicGateway(
   }
 }
 
-async function createPiSession(
-  projectRoot: string,
-  cfg: PiAgentConfig,
-  signal?: AbortSignal,
-): Promise<PiSessionSetup> {
+async function createPiSession(projectRoot: string, cfg: PiAgentConfig): Promise<PiSessionSetup> {
   const authStorage = createAuthStorage();
   configureRuntimeAuth(authStorage, cfg);
 
@@ -519,7 +470,7 @@ async function createPiSession(
   configureProviderOverrides(modelRegistry, cfg);
 
   const modelName = cfg.model ?? DEFAULT_MODEL;
-  const model = await resolvePiModelWithDynamicGateway(modelRegistry, modelName, cfg, signal);
+  const model = await resolvePiModelWithDynamicGateway(modelRegistry, modelName, cfg);
   const agentDir = getAgentDir();
   const settingsManager = SettingsManager.inMemory({
     defaultThinkingLevel: (cfg.thinkingLevel ?? DEFAULT_THINKING_LEVEL) as never,
@@ -849,7 +800,7 @@ export class PiAgentPlugin implements AgentPlugin {
       }
 
       try {
-        const setup = await createPiSession(projectRoot, cfg, signal);
+        const setup = await createPiSession(projectRoot, cfg);
         session = setup.session;
         modelLabel = setup.modelLabel;
         if (attempt === 1) {
@@ -1000,7 +951,7 @@ export class PiAgentPlugin implements AgentPlugin {
       }
 
       try {
-        const setup = await createPiSession(projectRoot, cfg, signal);
+        const setup = await createPiSession(projectRoot, cfg);
         session = setup.session;
         modelLabel = setup.modelLabel;
         if (attempt === 1) {
