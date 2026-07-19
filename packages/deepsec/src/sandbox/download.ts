@@ -3,7 +3,7 @@ import path from "node:path";
 import { dataDir } from "@deepsec/core";
 import type { Sandbox } from "@vercel/sandbox";
 import * as tar from "tar";
-import { mergeAfterExtract, snapshotFileRecords } from "./merge-records.js";
+import { isFileRecordPath, mergeAfterExtract, snapshotFileRecords } from "./merge-records.js";
 import { DATA_DIR } from "./setup.js";
 
 // Sandbox results are JSON file records, run metadata, reports, and
@@ -51,7 +51,11 @@ const ALLOWED_ENTRY_PATTERNS: RegExp[] = [
 const MAX_TARBALL_BYTES = 256 * 1024 * 1024; // 256 MiB compressed
 const MAX_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024; // 1 GiB total
 const MAX_ENTRIES = 50_000;
-const MAX_PER_FILE_BYTES = 32 * 1024 * 1024; // 32 MiB per record
+// Sized with headroom over the largest real-world record we've seen: the
+// next.js dataset's record for a compiled webpack bundle is 34.2 MiB, and
+// rejection is all-or-nothing for the tarball, so a too-tight cap blocks
+// the whole download.
+const MAX_PER_FILE_BYTES = 64 * 1024 * 1024; // 64 MiB per record
 
 const SETUP_MARKER = "/tmp/deepsec-setup-done";
 
@@ -171,6 +175,32 @@ export async function downloadResults(
   return count;
 }
 
+// Serializes snapshot → extract → merge per destination directory. All 30
+// sandbox download loops extract into the same data dir; overlapping
+// sequences would (a) stack pre-extract snapshots in memory and (b) race
+// each other's read-modify-write of shared records, resurrecting stale
+// versions. Extracts are cheap once snapshots are tarball-scoped, so a
+// plain promise-chain mutex costs nothing in throughput.
+const extractLocks = new Map<string, Promise<void>>();
+
+async function withExtractLock<T>(destDir: string, fn: () => Promise<T>): Promise<T> {
+  const key = path.resolve(destDir);
+  const prev = extractLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  const tail = prev.then(() => gate);
+  extractLocks.set(key, tail);
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (extractLocks.get(key) === tail) extractLocks.delete(key);
+  }
+}
+
 export async function extractTarballLocally(tarPath: string, destDir: string): Promise<number> {
   // Two-pass: list to validate, then extract. The list pass is hard
   // "all or nothing" — if any entry is disallowed (wrong type or
@@ -185,6 +215,7 @@ export async function extractTarballLocally(tarPath: string, destDir: string): P
   // log-and-skip. The extract pass runs with default safety; we know
   // the archive is clean by then.
   const violations: string[] = [];
+  const entryPaths: string[] = [];
   let fileCount = 0;
   let totalUncompressed = 0;
   await tar.list({
@@ -226,6 +257,7 @@ export async function extractTarballLocally(tarPath: string, destDir: string): P
       }
       totalUncompressed += sz;
       fileCount++;
+      entryPaths.push(norm);
       if (fileCount > MAX_ENTRIES) {
         violations.push(`entry count exceeds cap of ${MAX_ENTRIES}`);
       }
@@ -244,13 +276,19 @@ export async function extractTarballLocally(tarPath: string, destDir: string): P
     );
   }
 
-  // Snapshot existing per-file records BEFORE extracting. The tarball
-  // extract is a blind overwrite, so without this any prior on-host
-  // analysisHistory / findings / revalidation / triage entries would
-  // disappear when a concurrently-running sandbox uploads its (older)
-  // view of the same file. We re-merge after extract.
-  const hostSnapshot = snapshotFileRecords(destDir);
-  await tar.extract({ file: tarPath, cwd: destDir });
-  mergeAfterExtract(destDir, hostSnapshot, path.basename(destDir));
+  // Snapshot the per-file records this tarball is about to overwrite
+  // BEFORE extracting. The tarball extract is a blind overwrite, so
+  // without this any prior on-host analysisHistory / findings /
+  // revalidation / triage entries would disappear when a
+  // concurrently-running sandbox uploads its (older) view of the same
+  // file. We re-merge after extract. Snapshot and merge are scoped to the
+  // tarball's own entry list, and the whole read-modify-write sequence is
+  // serialized per destDir — see withExtractLock.
+  const recordPaths = entryPaths.filter(isFileRecordPath);
+  await withExtractLock(destDir, async () => {
+    const hostSnapshot = snapshotFileRecords(destDir, recordPaths);
+    await tar.extract({ file: tarPath, cwd: destDir });
+    mergeAfterExtract(destDir, hostSnapshot, path.basename(destDir), recordPaths);
+  });
   return fileCount;
 }
