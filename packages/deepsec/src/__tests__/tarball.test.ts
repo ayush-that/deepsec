@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -203,9 +204,12 @@ describe("extractTarballLocally — strict allowlist", () => {
       path.join(src, "files", "ok.ts.json"),
       JSON.stringify(validRecord(projectId, "ok.ts")),
     );
-    // Just over the 64MiB per-file cap. Zeros compress to almost nothing,
-    // so the tarball itself stays tiny and fast.
-    fs.writeFileSync(path.join(src, "files", "fat.ts.json"), Buffer.alloc(64 * 1024 * 1024 + 1));
+    // Just over the 64MiB per-file cap. Random bytes, not zeros — tar's
+    // decompression-bomb guard rejects archives with a >1000x ratio.
+    fs.writeFileSync(
+      path.join(src, "files", "fat.ts.json"),
+      crypto.randomBytes(64 * 1024 * 1024 + 1),
+    );
     const stats = await makeTarball(src, []);
     fs.rmSync(src, { recursive: true, force: true });
 
