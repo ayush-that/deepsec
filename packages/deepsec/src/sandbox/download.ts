@@ -51,10 +51,11 @@ const ALLOWED_ENTRY_PATTERNS: RegExp[] = [
 const MAX_TARBALL_BYTES = 256 * 1024 * 1024; // 256 MiB compressed
 const MAX_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024; // 1 GiB total
 const MAX_ENTRIES = 50_000;
-// Sized with headroom over the largest real-world record we've seen: the
-// next.js dataset's record for a compiled webpack bundle is 34.2 MiB, and
-// rejection is all-or-nothing for the tarball, so a too-tight cap blocks
-// the whole download.
+// Per-file size is a soft cap: oversized entries are skipped during
+// extraction (and reported) rather than failing the whole tarball, since a
+// single fat record — e.g. for a large compiled bundle — shouldn't discard
+// every other result from the run. The other caps stay hard/all-or-nothing:
+// they defend against decompression bombs and smuggled content.
 const MAX_PER_FILE_BYTES = 64 * 1024 * 1024; // 64 MiB per record
 
 const SETUP_MARKER = "/tmp/deepsec-setup-done";
@@ -160,7 +161,11 @@ export async function downloadResults(
   const localProjectDir = dataDir(projectId);
   fs.mkdirSync(localProjectDir, { recursive: true });
 
-  const count = await extractTarballLocally(localTarPath, localProjectDir);
+  const count = await extractTarballLocally(localTarPath, localProjectDir, (entryPath, bytes) => {
+    onLog(
+      `[sandbox-${sandboxIndex}] Skipped oversized result file "${entryPath}" (${(bytes / 1024 / 1024).toFixed(1)}MB > ${(MAX_PER_FILE_BYTES / 1024 / 1024).toFixed(0)}MB cap)`,
+    );
+  });
   try {
     fs.unlinkSync(localTarPath);
   } catch {}
@@ -201,7 +206,11 @@ async function withExtractLock<T>(destDir: string, fn: () => Promise<T>): Promis
   }
 }
 
-export async function extractTarballLocally(tarPath: string, destDir: string): Promise<number> {
+export async function extractTarballLocally(
+  tarPath: string,
+  destDir: string,
+  onSkip?: (entryPath: string, sizeBytes: number) => void,
+): Promise<number> {
   // Two-pass: list to validate, then extract. The list pass is hard
   // "all or nothing" — if any entry is disallowed (wrong type or
   // extension), we throw before a single byte hits disk, so callers
@@ -216,6 +225,7 @@ export async function extractTarballLocally(tarPath: string, destDir: string): P
   // the archive is clean by then.
   const violations: string[] = [];
   const entryPaths: string[] = [];
+  const oversized = new Map<string, number>();
   let fileCount = 0;
   let totalUncompressed = 0;
   await tar.list({
@@ -249,13 +259,14 @@ export async function extractTarballLocally(tarPath: string, destDir: string): P
         return;
       }
       const sz = (entry as unknown as { size?: number }).size ?? 0;
+      // Count oversized entries toward the total-size bomb defense even
+      // though we skip them: the archive still streams through the
+      // extractor either way.
+      totalUncompressed += sz;
       if (sz > MAX_PER_FILE_BYTES) {
-        violations.push(
-          `"${entry.path}" is ${(sz / 1024 / 1024).toFixed(1)}MB > per-file cap ${(MAX_PER_FILE_BYTES / 1024 / 1024).toFixed(0)}MB`,
-        );
+        oversized.set(norm, sz);
         return;
       }
-      totalUncompressed += sz;
       fileCount++;
       entryPaths.push(norm);
       if (fileCount > MAX_ENTRIES) {
@@ -284,10 +295,18 @@ export async function extractTarballLocally(tarPath: string, destDir: string): P
   // file. We re-merge after extract. Snapshot and merge are scoped to the
   // tarball's own entry list, and the whole read-modify-write sequence is
   // serialized per destDir — see withExtractLock.
+  for (const [entryPath, sizeBytes] of oversized) {
+    onSkip?.(entryPath, sizeBytes);
+  }
+
   const recordPaths = entryPaths.filter(isFileRecordPath);
   await withExtractLock(destDir, async () => {
     const hostSnapshot = snapshotFileRecords(destDir, recordPaths);
-    await tar.extract({ file: tarPath, cwd: destDir });
+    await tar.extract({
+      file: tarPath,
+      cwd: destDir,
+      filter: (entryPath) => !oversized.has(entryPath.replace(/^\.\//, "")),
+    });
     mergeAfterExtract(destDir, hostSnapshot, path.basename(destDir), recordPaths);
   });
   return fileCount;

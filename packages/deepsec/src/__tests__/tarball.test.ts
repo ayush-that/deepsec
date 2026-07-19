@@ -195,6 +195,34 @@ describe("extractTarballLocally — strict allowlist", () => {
     expect("files/../etc/passwd.json".split("/").includes("..")).toBe(true);
   });
 
+  it("skips an oversized entry but extracts the rest of the tarball", async () => {
+    const projectId = path.basename(destDir);
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-tar-fat-"));
+    fs.mkdirSync(path.join(src, "files"));
+    fs.writeFileSync(
+      path.join(src, "files", "ok.ts.json"),
+      JSON.stringify(validRecord(projectId, "ok.ts")),
+    );
+    // Just over the 64MiB per-file cap. Zeros compress to almost nothing,
+    // so the tarball itself stays tiny and fast.
+    fs.writeFileSync(path.join(src, "files", "fat.ts.json"), Buffer.alloc(64 * 1024 * 1024 + 1));
+    const stats = await makeTarball(src, []);
+    fs.rmSync(src, { recursive: true, force: true });
+
+    const skipped: { entryPath: string; sizeBytes: number }[] = [];
+    const count = await extractTarballLocally(stats.tarPath, destDir, (entryPath, sizeBytes) =>
+      skipped.push({ entryPath, sizeBytes }),
+    );
+    fs.unlinkSync(stats.tarPath);
+
+    expect(count).toBe(1);
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].entryPath.endsWith("files/fat.ts.json")).toBe(true);
+    expect(skipped[0].sizeBytes).toBe(64 * 1024 * 1024 + 1);
+    expect(fs.existsSync(path.join(destDir, "files", "ok.ts.json"))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, "files", "fat.ts.json"))).toBe(false);
+  });
+
   it("refuses a tarball containing a symlink entry", async () => {
     // Build a tarball directly via tar.create that intentionally
     // includes a symlink — bypassing makeTarball's own filter — so
