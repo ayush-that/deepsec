@@ -66,17 +66,45 @@ describe("mergeFileRecord", () => {
     expect(merged.status).toBe("analyzed");
   });
 
-  it("dedupes analysisHistory when both sides serialize the same runId", () => {
+  it("dedupes an identical entry seen on both sides, regardless of key order", () => {
     const sameEntry = entry("run-x", "codex", "2026-05-06T15:59:48.000Z");
+    // Same entry, keys in a different order — simulates the host path
+    // (raw JSON.parse) vs the incoming path (zod parse) serializing the
+    // same entry differently.
+    const reordered = Object.fromEntries(
+      Object.entries(sameEntry).reverse(),
+    ) as unknown as AnalysisEntry;
     const host = record({ analysisHistory: [sameEntry] });
-    const incoming = record({
-      analysisHistory: [{ ...sameEntry, findingCount: 5 }],
-    });
+    const incoming = record({ analysisHistory: [reordered] });
 
     const merged = mergeFileRecord(host, incoming);
 
     expect(merged.analysisHistory).toHaveLength(1);
-    expect(merged.analysisHistory[0].findingCount).toBe(5); // incoming wins
+  });
+
+  it("keeps multiple same-runId entries (revalidate split retries) with their own accounting", () => {
+    // One revalidate run appends several entries per file under the same
+    // runId: the initial invocation plus per-file / per-finding split
+    // retries, each carrying its own cost/token share. Keying the merge
+    // by runId alone collapsed these and silently dropped the accounting.
+    const initial = {
+      ...entry("reval-run", "claude-agent-sdk", "2026-05-06T15:54:37.000Z"),
+      phase: "revalidate" as const,
+      costUsd: 0.4,
+    };
+    const retry = {
+      ...entry("reval-run", "claude-agent-sdk", "2026-05-06T15:58:02.000Z"),
+      phase: "revalidate" as const,
+      costUsd: 0.1,
+    };
+    const host = record({ analysisHistory: [initial] });
+    const incoming = record({ analysisHistory: [initial, retry] });
+
+    const merged = mergeFileRecord(host, incoming);
+
+    expect(merged.analysisHistory).toHaveLength(2);
+    const totalCost = merged.analysisHistory.reduce((s, e) => s + (e.costUsd ?? 0), 0);
+    expect(totalCost).toBeCloseTo(0.5, 6);
   });
 
   it("unions findings by vulnSlug+title signature", () => {

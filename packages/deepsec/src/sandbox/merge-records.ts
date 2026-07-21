@@ -64,9 +64,13 @@ export function snapshotFileRecords(
  * from per-file `analysisHistory` despite being recorded in `runs/*.json`.
  *
  * Merge strategy:
- *   - `analysisHistory`: union by `runId` (each run is globally unique).
- *     For the same runId on both sides, prefer `incoming` since the
- *     tarball is the more recent serialization.
+ *   - `analysisHistory`: union by canonical entry value. Entries are
+ *     append-only and never mutated after write, so value equality means
+ *     "the same entry seen from both sides". Keying by `runId` alone is
+ *     NOT enough: one revalidate run appends multiple entries per file
+ *     under the same runId (initial invocation + per-file / per-finding
+ *     split retries), each carrying its own cost/token/duration share —
+ *     collapsing them would silently drop that accounting.
  *   - `findings`: union by `(vulnSlug, normalized title)` signature, the
  *     same key `process()` uses to dedupe re-runs. For matching findings,
  *     merge field-by-field so a `revalidation` / `triage` set on either
@@ -83,14 +87,18 @@ export function snapshotFileRecords(
  *     scan run that has its own non-racing lifecycle.
  */
 export function mergeFileRecord(host: FileRecord, incoming: FileRecord): FileRecord {
-  const historyByRunId = new Map<string, AnalysisEntry>();
-  for (const entry of host.analysisHistory ?? []) {
-    historyByRunId.set(entry.runId, entry);
+  // Key by canonical (key-order-independent) serialization, not runId:
+  // split retries append several same-runId entries that must all
+  // survive, while the identical entry arriving via both the host
+  // snapshot and the tarball must land exactly once. Canonicalization
+  // matters because the two sides can serialize the same entry with
+  // different key order (raw JSON.parse on the host path vs zod parse on
+  // the incoming path).
+  const historyByValue = new Map<string, AnalysisEntry>();
+  for (const entry of [...(host.analysisHistory ?? []), ...(incoming.analysisHistory ?? [])]) {
+    historyByValue.set(canonicalJson(entry), entry);
   }
-  for (const entry of incoming.analysisHistory ?? []) {
-    historyByRunId.set(entry.runId, entry);
-  }
-  const mergedHistory = Array.from(historyByRunId.values()).sort(
+  const mergedHistory = Array.from(historyByValue.values()).sort(
     (a, b) => new Date(a.investigatedAt).getTime() - new Date(b.investigatedAt).getTime(),
   );
 
@@ -115,6 +123,25 @@ export function mergeFileRecord(host: FileRecord, incoming: FileRecord): FileRec
     analysisHistory: mergedHistory,
     status,
   };
+}
+
+/**
+ * Deterministic JSON serialization: object keys sorted at every level,
+ * `undefined` values omitted (like JSON.stringify). Two structurally
+ * equal entries produce the same string regardless of how they were
+ * parsed/constructed.
+ */
+function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  if (v !== null && typeof v === "object") {
+    const rec = v as Record<string, unknown>;
+    const parts = Object.keys(rec)
+      .sort()
+      .filter((k) => rec[k] !== undefined)
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(rec[k])}`);
+    return `{${parts.join(",")}}`;
+  }
+  return JSON.stringify(v) ?? "null";
 }
 
 function findingSignature(f: Finding): string {
