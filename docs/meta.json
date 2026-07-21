@@ -2,6 +2,7 @@
   "pages": [
     "getting-started",
     "reviewing-changes",
+    "external-scanners",
     "supported-tech",
     "writing-matchers",
     "models",

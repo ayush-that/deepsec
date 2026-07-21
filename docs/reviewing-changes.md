@@ -238,6 +238,60 @@ git diff --name-only origin/main \
   | deepsec process --files-from -
 ```
 
+## Change-window mode (`--duration`)
+
+Direct mode reviews a file list you hand it. **Change-window mode**
+resolves the list for you from "what changed on the default branch
+recently", and reviews the whole repo with those changed files
+investigated more deeply.
+
+```bash
+deepsec process --duration 30d
+```
+
+`<window>` is a day count — `7d`, `30d` — or a raw git `--since` string
+(`"1 month ago"`). It resolves against the merged default branch (what
+shipped), not in-flight branches, host-side (the sandbox strips `.git`).
+
+By default this is a **focus overlay, not a filter**: the entire repo is
+scanned and reviewed, but files changed inside the window get the deep
+pass (higher thinking level) while the rest run at medium. You get
+whole-repo coverage with the recent changes scrutinized hardest.
+
+| Flag              | Effect                                                                                                  |
+|-------------------|--------------------------------------------------------------------------------------------------------|
+| `--duration <w>`  | Window mode: full-repo review, window-changed files investigated deeper.                                |
+| `--diff-scan`     | Scope to **only** the window's changed files (like a diff review, but resolved from the window). CI-style — exits 1 on findings. |
+| `--dry-run`       | Resolve the window + scan (regex only) and print the deep-vs-standard split, then stop. **Zero AI spend.** |
+| `--no-graph`      | Skip blast-radius expansion (see below). It is **on by default** in window mode.                        |
+| `--no-external`   | Skip the trufflehog/semgrep pass and cross-check (see [External scanners](external-scanners.md)).       |
+
+### Blast radius
+
+In window mode, `deepsec` also pulls in **risk-path files that import the
+changed ones** (a changed auth helper drags in the routes that call it),
+via a reverse-import graph, and adds them to the deep set. This is on by
+default; `--no-graph` disables it and its extra whole-repo read pass.
+
+The graph is a regex reverse-reference index (it greps import specifiers
+and matches by path suffix), not a resolved AST/tsconfig graph. It's
+capped and filtered to risk-relevant importers. Plugins can replace it
+via the `GraphProvider` slot — see [plugins](plugins.md).
+
+### The report overlay
+
+`report --duration <window>` adds an **"Introduced in the last
+`<window>`"** section: findings whose line falls inside the window's
+added/changed hunks. Same day-count / git-since syntax as `process`.
+
+```bash
+deepsec report --project-id my-app --duration 30d
+```
+
+Pass `--require-human-ack` to keep external-scanner hits `open` (and the
+report gated) until a human signs off, rather than accepting an AI
+dismissal.
+
 ## When NOT to use direct mode
 
 - For the initial sweep of a large repo: full `scan` + `process` orders

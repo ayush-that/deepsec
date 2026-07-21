@@ -52,7 +52,8 @@ If you feel like the `deepsec` should look at more parts of the code, give it [t
 ## Docs
 
 - [docs/getting-started.md](docs/getting-started.md) — first-scan walkthrough
-- [docs/reviewing-changes.md](docs/reviewing-changes.md) — `process --diff` for PR review and CI gating
+- [docs/reviewing-changes.md](docs/reviewing-changes.md) — `process --diff` for PR review, and `--duration` change-window mode
+- [docs/external-scanners.md](docs/external-scanners.md) — trufflehog + semgrep as a deterministic cross-check
 - [docs/supported-tech.md](docs/supported-tech.md) — frameworks and ecosystems deepsec recognizes out of the box
 - [docs/writing-matchers.md](docs/writing-matchers.md) — **prompt your coding agent to grow your matcher set**
 - [docs/configuration.md](docs/configuration.md) — `deepsec.config.ts` reference
@@ -122,6 +123,7 @@ Running on a sandbox (see above) does limit the potential exposure substantially
 | `scan`          | Find candidate sites with regex matchers (fast, no AI)   |
 | `process`       | AI investigation; emits findings + recommendation        |
 | `process --diff`| PR-mode: scan + investigate only files changed in a diff |
+| `process --duration`| Change-window mode: full review, recent changes investigated deeper |
 | `triage`        | Lightweight P0/P1/P2 classification (cheaper model)      |
 | `revalidate`    | Re-check existing findings; checks git history for fixes |
 | `enrich`        | Add git committer info + (with a plugin) ownership data  |

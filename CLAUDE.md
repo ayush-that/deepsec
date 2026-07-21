@@ -39,3 +39,10 @@ pnpm deepsec ...    # the CLI (runs via tsx)
 - The AI prompt template lives in `packages/processor/src/index.ts`. It
   is intentionally generic. Don't add organization-specific context
   there; use `data/<projectId>/INFO.md` or `config.json:promptAppend`.
+- Change-window mode (`--duration`) lives in
+  `packages/processor/src/window/` (resolve + focus overlay + blast-radius
+  graph) and the `process`/`report` command handlers. External scanners
+  (trufflehog/semgrep) run from `packages/scanner/src/external/`, are
+  stored aside, and reconciled by `packages/processor/src/reconcile.ts`;
+  the CLI glue is `packages/deepsec/src/external-scan.ts`. User docs:
+  `docs/reviewing-changes.md` and `docs/external-scanners.md`.
