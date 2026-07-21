@@ -4,7 +4,6 @@ import type { RefusalReport } from "@deepsec/core";
 import {
   type AgentSession,
   type AgentSessionEvent,
-  AuthStorage,
   createAgentSession,
   createFindToolDefinition,
   createGrepToolDefinition,
@@ -13,6 +12,7 @@ import {
   DefaultResourceLoader,
   getAgentDir,
   ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
   type ToolDefinition,
@@ -54,7 +54,15 @@ const DEFAULT_MODEL = "zai/glm-5.2";
 const DEFAULT_THINKING_LEVEL = "xhigh";
 const DEFAULT_TOOLS = ["read", "grep", "find", "ls"];
 const GATEWAY_PROVIDER = "vercel-ai-gateway";
-const GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh/v1";
+// pi's built-in gateway provider speaks the gateway's Anthropic Messages
+// endpoint (since pi 0.81) — NOT the OpenAI-compat one. This matters for
+// Gemini 3.x: the Anthropic wire format round-trips thinking signatures,
+// which Gemini requires on replayed tool calls; pi's openai-completions
+// client drops the gateway's `extra_content.google.thought_signature`
+// and every multi-turn tool session 400s. Keep pass-through models on
+// the same api/baseUrl as the built-in provider.
+const GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh";
+const GATEWAY_API = "anthropic-messages" as const;
 const TOOL_ERROR_DETAIL_LIMIT = 500;
 
 const DEEPSEC_SYSTEM_NOTE =
@@ -291,30 +299,44 @@ function isGatewayModelRequest(requested: string, cfg: PiAgentConfig): boolean {
   );
 }
 
+/**
+ * First non-empty env credential. `||` (not `??`) on purpose: a set-but-
+ * empty ANTHROPIC_API_KEY would otherwise "win" the chain and produce a
+ * confusing provider-auth error downstream.
+ */
 function getGatewayCredential(): string | undefined {
   return (
-    process.env.AI_GATEWAY_API_KEY ??
-    process.env.VERCEL_OIDC_TOKEN ??
-    process.env.OPENAI_API_KEY ??
-    process.env.ANTHROPIC_AUTH_TOKEN ??
-    process.env.ANTHROPIC_API_KEY
+    process.env.AI_GATEWAY_API_KEY ||
+    process.env.VERCEL_OIDC_TOKEN ||
+    process.env.OPENAI_API_KEY ||
+    process.env.ANTHROPIC_AUTH_TOKEN ||
+    process.env.ANTHROPIC_API_KEY ||
+    undefined
   );
 }
 
-function configureRuntimeAuth(authStorage: AuthStorage, cfg: PiAgentConfig): void {
-  const gatewayKey = getGatewayCredential();
-  if (gatewayKey) authStorage.setRuntimeApiKey(GATEWAY_PROVIDER, gatewayKey);
+async function configureRuntimeAuth(runtime: ModelRuntime, cfg: PiAgentConfig): Promise<void> {
+  // allowNetwork: false on every call. setRuntimeApiKey's refresh
+  // otherwise inherits the runtime's network default and performs a full
+  // remote model-catalog sweep (one fetch per builtin provider against
+  // catalog.earendil.works, no timeout) — observed hanging batch startup
+  // for many minutes. Deepsec only needs the static builtin catalogs and
+  // the user's models.json.
+  const offline = { allowNetwork: false } as const;
 
-  const anthropicKey = process.env.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN;
-  if (anthropicKey) authStorage.setRuntimeApiKey("anthropic", anthropicKey);
+  const gatewayKey = getGatewayCredential();
+  if (gatewayKey) await runtime.setRuntimeApiKey(GATEWAY_PROVIDER, gatewayKey, offline);
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN;
+  if (anthropicKey) await runtime.setRuntimeApiKey("anthropic", anthropicKey, offline);
 
   const openaiKey = process.env.OPENAI_API_KEY;
-  if (openaiKey) authStorage.setRuntimeApiKey("openai", openaiKey);
+  if (openaiKey) await runtime.setRuntimeApiKey("openai", openaiKey, offline);
 
   const customProvider = cfg.aiProvider ?? modelProviderFromName(cfg.model);
   if (customProvider && cfg.aiApiKeyEnv) {
     const key = process.env[cfg.aiApiKeyEnv];
-    if (key) authStorage.setRuntimeApiKey(customProvider, key);
+    if (key) await runtime.setRuntimeApiKey(customProvider, key, offline);
   }
 }
 
@@ -340,7 +362,7 @@ function createGatewayPassThroughModel(modelId: string): PiProviderModelConfig {
   return {
     id: modelId,
     name: modelId,
-    api: "openai-completions",
+    api: GATEWAY_API,
     reasoning: true,
     input: ["text", "image"],
     cost: {
@@ -396,14 +418,9 @@ function registerGatewayModelIfNeeded(
   registry.registerProvider(GATEWAY_PROVIDER, {
     baseUrl: GATEWAY_BASE_URL,
     apiKey: getGatewayCredential() ?? "$AI_GATEWAY_API_KEY",
-    api: "openai-completions",
+    api: GATEWAY_API,
     models,
   });
-}
-
-function createAuthStorage(): AuthStorage {
-  const authPath = path.join(getAgentDir(), "auth.json");
-  return fs.existsSync(authPath) ? AuthStorage.create(authPath) : AuthStorage.inMemory();
 }
 
 function resolvePiModel(registry: ModelRegistry, requested: string, cfg: PiAgentConfig): PiModel {
@@ -417,10 +434,20 @@ function resolvePiModel(registry: ModelRegistry, requested: string, cfg: PiAgent
   if (slash > 0) {
     const provider = requested.slice(0, slash);
     const modelId = requested.slice(slash + 1);
+    const direct = registry.find(provider, modelId);
+
+    // An explicit custom override (--ai-provider, or --ai-base-url
+    // without a provider name) targets the direct provider — never
+    // silently reroute through the gateway. Matters since pi 0.81 ships
+    // a populated gateway catalog: without this check, the gateway
+    // entry would shadow the user's configured provider.
+    const customOverrideTargetsProvider =
+      cfg.aiProvider === provider || (!cfg.aiProvider && !!cfg.aiBaseUrl);
+    if (customOverrideTargetsProvider && direct) return direct;
+
     const gatewayModel = registry.find(GATEWAY_PROVIDER, requested);
     if (gatewayModel) return gatewayModel;
 
-    const direct = registry.find(provider, modelId);
     if (direct && !preferGateway) return direct;
     if (direct && registry.hasConfiguredAuth(direct)) return direct;
   } else {
@@ -461,15 +488,31 @@ export async function resolvePiModelWithDynamicGateway(
 }
 
 async function createPiSession(projectRoot: string, cfg: PiAgentConfig): Promise<PiSessionSetup> {
-  const authStorage = createAuthStorage();
-  configureRuntimeAuth(authStorage, cfg);
+  const agentDir = getAgentDir();
+  // Pin pi offline for remote model-catalog purposes (set-and-leave: pi
+  // sessions run concurrently in this process, so restoring the var
+  // would race). The runtime reads PI_OFFLINE at create time; without
+  // it, internal refreshes may fetch per-provider catalogs from
+  // catalog.earendil.works with no timeout. Static builtin catalogs and
+  // models.json keep working; only the network refresh is disabled.
+  process.env.PI_OFFLINE ??= "1";
+  // ModelRuntime is pi ≥0.81's canonical model/auth container (it
+  // replaced the AuthStorage + ModelRegistry.create pair). Uses the
+  // user's auth.json / models.json when present; runtime API keys from
+  // env are layered on top without being persisted.
+  const runtime = await ModelRuntime.create({
+    authPath: path.join(agentDir, "auth.json"),
+    modelsPath: path.join(agentDir, "models.json"),
+  });
+  await configureRuntimeAuth(runtime, cfg);
 
-  const modelRegistry = ModelRegistry.create(authStorage, path.join(getAgentDir(), "models.json"));
+  // Sync facade over the runtime — keeps our resolution helpers (and
+  // their tests) on the same ModelRegistry API as before.
+  const modelRegistry = new ModelRegistry(runtime);
   configureProviderOverrides(modelRegistry, cfg);
 
   const modelName = cfg.model ?? DEFAULT_MODEL;
   const model = await resolvePiModelWithDynamicGateway(modelRegistry, modelName, cfg);
-  const agentDir = getAgentDir();
   const settingsManager = SettingsManager.inMemory({
     defaultThinkingLevel: (cfg.thinkingLevel ?? DEFAULT_THINKING_LEVEL) as never,
     compaction: { enabled: false },
@@ -493,8 +536,7 @@ async function createPiSession(projectRoot: string, cfg: PiAgentConfig): Promise
   const result = await createAgentSession({
     cwd: projectRoot,
     agentDir,
-    authStorage,
-    modelRegistry,
+    modelRuntime: runtime,
     settingsManager,
     resourceLoader,
     sessionManager: SessionManager.inMemory(projectRoot),
@@ -649,6 +691,23 @@ async function* runPiPrompt(params: {
           message: `${e.toolName ?? "tool"}${target ? `: ${target}` : ""}`,
           candidateFile: target,
         });
+        break;
+      }
+      case "message_end": {
+        // A provider/API failure mid-conversation surfaces as an
+        // assistant message with stopReason "error" — session.prompt()
+        // still resolves normally. Without this check the run looks like
+        // a silent no-op ("no result, no error captured") and burns all
+        // retry attempts on a deterministic failure. Observed with
+        // Gemini 3.x's thought-signature 400s via the gateway.
+        const msg = e.message as
+          | { role?: string; stopReason?: string; errorMessage?: string }
+          | undefined;
+        if (msg?.role === "assistant" && msg.stopReason === "error") {
+          const detail = msg.errorMessage || "assistant turn ended with stopReason=error";
+          promptError = promptError ?? new Error(`Pi assistant error: ${detail}`);
+          push({ type: "error", message: `Pi assistant error: ${detail.slice(0, 300)}` });
+        }
         break;
       }
       case "tool_execution_end":

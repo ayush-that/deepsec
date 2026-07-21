@@ -1,12 +1,26 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createPiReadOnlyToolDefinitions,
   resolvePiModelWithDynamicGateway,
 } from "../agents/pi-sdk.js";
+
+/**
+ * Registry backed by a fresh ModelRuntime with no persisted auth and no
+ * models.json — only pi's built-in provider catalogs. Replaces the
+ * pre-0.81 `ModelRegistry.inMemory(AuthStorage.inMemory())`.
+ */
+async function freshRegistry(): Promise<ModelRegistry> {
+  const tmp = mkdtempSync(path.join(tmpdir(), "deepsec-pi-auth-"));
+  const runtime = await ModelRuntime.create({
+    authPath: path.join(tmp, "auth.json"),
+    modelsPath: null,
+  });
+  return new ModelRegistry(runtime);
+}
 
 describe("Pi read-only tools", () => {
   let root: string;
@@ -69,6 +83,23 @@ describe("Pi model resolution", () => {
     globalThis.fetch = originalFetch;
   });
 
+  it("resolves catalog gateway models via the anthropic-messages gateway api", async () => {
+    // Gemini 3.x regression guard: the gateway provider must speak
+    // anthropic-messages (which round-trips thinking signatures), not
+    // openai-completions (which drops Gemini thought signatures and
+    // 400s on every replayed tool call).
+    delete process.env.AI_GATEWAY_API_KEY;
+    process.env.VERCEL_OIDC_TOKEN = "oidc_test";
+    process.env.OPENAI_BASE_URL = "https://ai-gateway.vercel.sh/v1";
+
+    const registry = await freshRegistry();
+    const model = await resolvePiModelWithDynamicGateway(registry, "google/gemini-3.6-flash", {});
+
+    expect(model.provider).toBe("vercel-ai-gateway");
+    expect(model.id).toBe("google/gemini-3.6-flash");
+    expect(model.api).toBe("anthropic-messages");
+  });
+
   it("registers missing Vercel AI Gateway model ids without fetching the catalog", async () => {
     delete process.env.AI_GATEWAY_API_KEY;
     process.env.VERCEL_OIDC_TOKEN = "oidc_test";
@@ -80,12 +111,15 @@ describe("Pi model resolution", () => {
       return new Response(JSON.stringify({ data: [] }), { status: 200 });
     };
 
-    const registry = ModelRegistry.inMemory(AuthStorage.inMemory());
-    const model = await resolvePiModelWithDynamicGateway(registry, "xai/grok-4.5", {});
+    const registry = await freshRegistry();
+    // An id absent from pi's shipped gateway catalog exercises the
+    // dynamic pass-through registration.
+    const model = await resolvePiModelWithDynamicGateway(registry, "acme/nonexistent-model-1", {});
 
     expect(model.provider).toBe("vercel-ai-gateway");
-    expect(model.id).toBe("xai/grok-4.5");
-    expect(model.name).toBe("xai/grok-4.5");
+    expect(model.id).toBe("acme/nonexistent-model-1");
+    expect(model.name).toBe("acme/nonexistent-model-1");
+    expect(model.api).toBe("anthropic-messages");
     expect(model.reasoning).toBe(true);
     expect(model.input).toEqual(["text", "image"]);
     expect(model.contextWindow).toBe(128000);
@@ -94,7 +128,11 @@ describe("Pi model resolution", () => {
     expect(called).toBe(false);
   });
 
-  it("does not register Gateway models for explicit custom provider overrides", async () => {
+  it("prefers the direct provider over the gateway catalog for explicit --ai-provider overrides", async () => {
+    // Since pi 0.81 the gateway catalog ships populated, so
+    // `vercel-ai-gateway/xai/grok-4.5` exists out of the box. An explicit
+    // custom provider override must still route to the direct provider,
+    // not get shadowed by the gateway entry.
     process.env.AI_GATEWAY_API_KEY = "vck_test";
     process.env.OPENAI_BASE_URL = "https://ai-gateway.vercel.sh/v1";
     let called = false;
@@ -103,12 +141,31 @@ describe("Pi model resolution", () => {
       return new Response(JSON.stringify({ data: [] }), { status: 200 });
     };
 
-    const registry = ModelRegistry.inMemory(AuthStorage.inMemory());
+    const registry = await freshRegistry();
+    const model = await resolvePiModelWithDynamicGateway(registry, "xai/grok-4.5", {
+      aiProvider: "xai",
+      aiApiKeyEnv: "XAI_API_KEY",
+    });
+    expect(model.provider).toBe("xai");
+    expect(model.id).toBe("grok-4.5");
+    expect(called).toBe(false);
+  });
+
+  it("does not register pass-through Gateway models for explicit custom provider overrides", async () => {
+    process.env.AI_GATEWAY_API_KEY = "vck_test";
+    process.env.OPENAI_BASE_URL = "https://ai-gateway.vercel.sh/v1";
+    let called = false;
+    globalThis.fetch = async () => {
+      called = true;
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    };
+
+    const registry = await freshRegistry();
     await expect(
-      resolvePiModelWithDynamicGateway(registry, "xai/grok-4.5", {
-        aiProvider: "xai",
+      resolvePiModelWithDynamicGateway(registry, "acme/nonexistent-model-1", {
+        aiProvider: "acme",
       }),
-    ).rejects.toThrow(/Pi model not found: xai\/grok-4\.5/);
+    ).rejects.toThrow(/Pi model not found: acme\/nonexistent-model-1/);
     expect(called).toBe(false);
   });
 });
