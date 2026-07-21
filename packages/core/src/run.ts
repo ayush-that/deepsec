@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ensureFindingIds } from "./finding-id.js";
 import {
   dataDir,
   fileRecordPath,
@@ -276,7 +277,12 @@ export function readFileRecord(projectId: string, filePath: string): FileRecord 
   if (!fs.existsSync(p)) return null;
   try {
     const raw = JSON.parse(fs.readFileSync(p, "utf-8"));
-    return fileRecordSchema.parse(raw);
+    const record = fileRecordSchema.parse(raw);
+    // Lazy backfill: records written before findingId existed get
+    // deterministic IDs assigned in memory on every load (same inputs →
+    // same IDs), and the IDs persist on the next write.
+    ensureFindingIds(record);
+    return record;
   } catch {
     return null;
   }
@@ -390,7 +396,9 @@ export function loadAllFileRecords(projectId: string): FileRecord[] {
       } else if (entry.name.endsWith(".json")) {
         try {
           const raw = JSON.parse(fs.readFileSync(full, "utf-8"));
-          records.push(fileRecordSchema.parse(raw));
+          const record = fileRecordSchema.parse(raw);
+          ensureFindingIds(record); // see readFileRecord
+          records.push(record);
         } catch {
           // skip malformed
         }

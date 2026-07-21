@@ -28,6 +28,7 @@ import {
   parseRevalidateVerdicts,
   QuotaExhaustedError,
   REFUSAL_FOLLOWUP_PROMPT,
+  runRevalidateIdRepairLoop,
   writeParseFailureDebug,
 } from "./shared.js";
 import type {
@@ -39,6 +40,7 @@ import type {
   InvestigateResult,
   RevalidateOutput,
   RevalidateParams,
+  RevalidateRawResponse,
   RevalidateVerdict,
 } from "./types.js";
 
@@ -951,7 +953,16 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
   }
 
   async *revalidate(params: RevalidateParams): AsyncGenerator<AgentProgress, RevalidateOutput> {
-    const { batch, projectRoot, projectInfo, config, force = false, signal, projectId } = params;
+    const {
+      batch,
+      projectRoot,
+      projectInfo,
+      config,
+      force = false,
+      onlyFindingIds,
+      signal,
+      projectId,
+    } = params;
     const model = (config.model as string) ?? DEFAULT_MODEL;
     const effort = (config.reasoningEffort as ModelReasoningEffort) ?? DEFAULT_EFFORT;
 
@@ -960,8 +971,10 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
       projectRoot,
       projectInfo,
       force,
+      onlyFindingIds: onlyFindingIds ? new Set(onlyFindingIds) : undefined,
     });
     const totalFindings = built.totalFindings;
+    const expected = built.expected;
     const prompt = `${codexEnvironmentPreamble(projectRoot)}\n\n${built.prompt}`;
 
     yield {
@@ -1129,6 +1142,8 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
         );
       }
 
+      const preResponses: RevalidateRawResponse[] = [];
+      let parsedText = resultText;
       let verdicts: RevalidateVerdict[];
       try {
         verdicts = parseRevalidateVerdicts(resultText);
@@ -1137,12 +1152,13 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
           type: "thinking" as const,
           message: "Codex returned non-JSON revalidation output; requesting JSON-only repair",
         };
+        const jsonRepairPrompt = buildRevalidateJsonRepairPrompt(expected);
         const repairText = await runToollessFollowUp(
           codex,
           threadId,
           projectRoot,
           model,
-          buildRevalidateJsonRepairPrompt(),
+          jsonRepairPrompt,
         );
         if (repairText === undefined) {
           writeParseFailureDebug({
@@ -1157,6 +1173,8 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
         }
         try {
           verdicts = parseRevalidateVerdicts(repairText);
+          preResponses.push({ kind: "json-repair", prompt: jsonRepairPrompt, rawText: resultText });
+          parsedText = repairText;
           yield { type: "thinking" as const, message: "Codex JSON repair succeeded" };
         } catch (repairErr) {
           const combinedError = jsonRepairFailureError(err, repairErr);
@@ -1178,6 +1196,19 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
         };
       }
 
+      // Id-repair inside the still-live thread (must run before the
+      // finally block tears down CODEX_HOME).
+      const repair = yield* runRevalidateIdRepairLoop({
+        expected,
+        verdicts,
+        initialRawText: parsedText,
+        followUp: threadId
+          ? (p) => runToollessFollowUp(codex, threadId, projectRoot, model, p)
+          : undefined,
+        agentLabel: "Codex",
+      });
+      verdicts = repair.verdicts;
+
       const refusal = await runRefusalFollowUp(codex, threadId, projectRoot, model);
       if (refusal?.refused) {
         yield {
@@ -1195,6 +1226,8 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
       return {
         verdicts,
         meta: { durationMs, ...sdkMeta, refusal },
+        rawResponses: [...preResponses, ...repair.rawResponses],
+        repairAttempts: repair.repairAttempts,
       };
     } finally {
       cleanup();

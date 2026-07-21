@@ -42,6 +42,12 @@ const ALLOWED_ENTRY_PATTERNS: RegExp[] = [
   // `-`), but the allowlist character class matches the same broad shape
   // as the files/ pattern so future debug filenames don't get rejected.
   /^\.?\/?debug\/[^/\\\0]+\.txt$/,
+  // Revalidation invocation artifacts: raw model responses +
+  // reconciliation diagnostics per agent call, one directory per run
+  // (`revalidation/<runId>/invocation-NNN.json`). Written by the
+  // processor's revalidate(); needed on the host to diagnose/rescore
+  // verdict mismatches from sandbox runs.
+  /^\.?\/?revalidation\/[^/\\\0]+\/[^/\\\0]+\.json$/,
 ];
 
 // Belt-and-suspenders caps on a sandbox-supplied tarball. The numbers err
@@ -255,7 +261,7 @@ export async function extractTarballLocally(
         return;
       }
       if (!ALLOWED_ENTRY_PATTERNS.some((re) => re.test(norm))) {
-        violations.push(`"${entry.path}" is outside files/, runs/, reports/`);
+        violations.push(`"${entry.path}" is outside files/, runs/, reports/, revalidation/`);
         return;
       }
       const sz = (entry as unknown as { size?: number }).size ?? 0;
@@ -283,7 +289,7 @@ export async function extractTarballLocally(
     const preview = violations.slice(0, 5).join("\n  ");
     const more = violations.length > 5 ? `\n  …and ${violations.length - 5} more` : "";
     throw new Error(
-      `Refusing sandbox results tarball: ${violations.length} disallowed entr${violations.length === 1 ? "y" : "ies"}:\n  ${preview}${more}\nAllowed: regular ${[...ALLOWED_EXTENSIONS].sort().join("/")} files under files/, runs/, or reports/; ≤${MAX_ENTRIES} entries, ≤${(MAX_UNCOMPRESSED_BYTES / 1024 / 1024).toFixed(0)}MB total.`,
+      `Refusing sandbox results tarball: ${violations.length} disallowed entr${violations.length === 1 ? "y" : "ies"}:\n  ${preview}${more}\nAllowed: regular ${[...ALLOWED_EXTENSIONS].sort().join("/")} files under files/, runs/, reports/, debug/, or revalidation/; ≤${MAX_ENTRIES} entries, ≤${(MAX_UNCOMPRESSED_BYTES / 1024 / 1024).toFixed(0)}MB total.`,
     );
   }
 

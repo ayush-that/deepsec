@@ -16,6 +16,7 @@ import {
   parseRevalidateVerdicts,
   QuotaExhaustedError,
   REFUSAL_FOLLOWUP_PROMPT,
+  runRevalidateIdRepairLoop,
   writeParseFailureDebug,
 } from "./shared.js";
 import type {
@@ -27,6 +28,7 @@ import type {
   InvestigateResult,
   RevalidateOutput,
   RevalidateParams,
+  RevalidateRawResponse,
   RevalidateVerdict,
 } from "./types.js";
 
@@ -476,7 +478,16 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
   }
 
   async *revalidate(params: RevalidateParams): AsyncGenerator<AgentProgress, RevalidateOutput> {
-    const { batch, projectRoot, projectInfo, config, force = false, signal, projectId } = params;
+    const {
+      batch,
+      projectRoot,
+      projectInfo,
+      config,
+      force = false,
+      onlyFindingIds,
+      signal,
+      projectId,
+    } = params;
     const model = (config.model as string) ?? "claude-opus-4-8";
     const maxTurns = (config.maxTurns as number) ?? 150;
 
@@ -488,11 +499,12 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
       else signal.addEventListener("abort", () => abortController.abort(), { once: true });
     }
 
-    const { prompt, totalFindings } = buildRevalidatePrompt({
+    const { prompt, totalFindings, expected } = buildRevalidatePrompt({
       batch,
       projectRoot,
       projectInfo,
       force,
+      onlyFindingIds: onlyFindingIds ? new Set(onlyFindingIds) : undefined,
     });
 
     yield {
@@ -614,6 +626,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
     }
 
     const durationMs = Date.now() - startTime;
+    const preResponses: RevalidateRawResponse[] = [];
     let verdicts: RevalidateVerdict[];
     try {
       verdicts = parseRevalidateVerdicts(resultText);
@@ -622,11 +635,12 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
         type: "thinking" as const,
         message: "Claude returned non-JSON revalidation output; requesting JSON-only repair",
       };
+      const jsonRepairPrompt = buildRevalidateJsonRepairPrompt(expected);
       const repairText = await runToollessFollowUp(
         sdkMeta.agentSessionId,
         model,
         projectRoot,
-        buildRevalidateJsonRepairPrompt(),
+        jsonRepairPrompt,
       );
       if (repairText === undefined) {
         writeParseFailureDebug({
@@ -641,6 +655,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
       }
       try {
         verdicts = parseRevalidateVerdicts(repairText);
+        preResponses.push({ kind: "json-repair", prompt: jsonRepairPrompt, rawText: resultText });
         resultText = repairText;
         yield { type: "thinking" as const, message: "Claude JSON repair succeeded" };
       } catch (repairErr) {
@@ -656,6 +671,19 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
         throw combinedError;
       }
     }
+
+    // Id-repair: recover verdicts the model returned under a mangled
+    // identifier by continuing the same session tool-free.
+    const repair = yield* runRevalidateIdRepairLoop({
+      expected,
+      verdicts,
+      initialRawText: resultText,
+      followUp: sdkMeta.agentSessionId
+        ? (p) => runToollessFollowUp(sdkMeta.agentSessionId, model, projectRoot, p)
+        : undefined,
+      agentLabel: "Claude",
+    });
+    verdicts = repair.verdicts;
 
     const refusal = await runRefusalFollowUp(sdkMeta.agentSessionId, model, projectRoot);
     if (refusal?.refused) {
@@ -674,6 +702,8 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
     return {
       verdicts,
       meta: { durationMs, ...sdkMeta, refusal },
+      rawResponses: [...preResponses, ...repair.rawResponses],
+      repairAttempts: repair.repairAttempts,
     };
   }
 }

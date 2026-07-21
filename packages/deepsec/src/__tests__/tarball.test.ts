@@ -110,6 +110,33 @@ describe("extractTarballLocally — strict allowlist", () => {
     ).toBe(true);
   });
 
+  it("accepts revalidation invocation artifacts under revalidation/<runId>/*.json", async () => {
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-tar-reval-"));
+    fs.mkdirSync(path.join(src, "revalidation", "20260101000000-abcdef0123456789"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(src, "revalidation", "20260101000000-abcdef0123456789", "invocation-000.json"),
+      JSON.stringify({ rawResponses: [] }),
+    );
+    const stats = await makeTarball(src, []);
+    fs.rmSync(src, { recursive: true, force: true });
+
+    const count = await extractTarballLocally(stats.tarPath, destDir);
+    fs.unlinkSync(stats.tarPath);
+    expect(count).toBe(1);
+    expect(
+      fs.existsSync(
+        path.join(
+          destDir,
+          "revalidation",
+          "20260101000000-abcdef0123456789",
+          "invocation-000.json",
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it("refuses a tarball with a disallowed extension and writes nothing", async () => {
     const src = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-tar-bad-"));
     fs.mkdirSync(path.join(src, "files"));

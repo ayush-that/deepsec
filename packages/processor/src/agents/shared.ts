@@ -3,7 +3,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { dataDir, type FileRecord, type Finding, type RefusalReport } from "@deepsec/core";
 import { jsonrepair } from "jsonrepair";
-import type { InvestigateResult, RevalidateVerdict } from "./types.js";
+import {
+  type ExpectedFinding,
+  expectedFindingsForBatch,
+  reconcileVerdicts,
+  shouldRevalidateFinding,
+} from "../reconcile.js";
+import type {
+  AgentProgress,
+  InvestigateResult,
+  RevalidateRawResponse,
+  RevalidateVerdict,
+} from "./types.js";
 
 // --- Retry / backoff -------------------------------------------------------
 
@@ -473,7 +484,11 @@ Use this exact schema:
 \`severity\` must be one of \`CRITICAL\`, \`HIGH\`, \`MEDIUM\`, \`HIGH_BUG\`, or \`BUG\`. \`confidence\` must be one of \`high\`, \`medium\`, or \`low\`.`;
 }
 
-export function buildRevalidateJsonRepairPrompt(): string {
+export function buildRevalidateJsonRepairPrompt(expected?: ExpectedFinding[]): string {
+  const idList =
+    expected && expected.length > 0
+      ? `\nReturn exactly one verdict for every Finding ID below, copying each \`findingId\` exactly:\n\n${expected.map((e) => `- ${e.alias ?? e.findingId} — "${e.title}"`).join("\n")}\n`
+      : "";
   return `Your previous response was not valid JSON, so the scanner could not parse it.
 
 Do not redo the revalidation and do not use tools. Re-output the same verdicts and reasoning from your previous response as ONLY one valid JSON array. No prose before or after. No "Confirmed:" preface. A \`\`\`json fenced block is acceptable, but the content inside must be valid JSON.
@@ -485,17 +500,158 @@ Use this exact schema:
 \`\`\`json
 [
   {
-    "filePath": "exact/path/to/file.ts",
-    "title": "exact title from the finding",
+    "findingId": "the exact Finding ID from the finding, e.g. F3",
     "verdict": "true-positive",
     "adjustedSeverity": "HIGH",
-    "duplicateOf": "title of the primary finding (only when verdict is duplicate)",
+    "duplicateOf": "Finding ID of the primary finding (only when verdict is duplicate)",
     "reasoning": "Detailed explanation. Show your work."
   }
 ]
 \`\`\`
-
+${idList}
 \`verdict\` must be one of \`true-positive\`, \`false-positive\`, \`fixed\`, \`uncertain\`, or \`duplicate\`. \`adjustedSeverity\` is optional and must be one of \`CRITICAL\`, \`HIGH\`, \`MEDIUM\`, \`HIGH_BUG\`, or \`BUG\` when present. \`duplicateOf\` is required only when \`verdict\` is \`"duplicate"\`; omit it otherwise.`;
+}
+
+/**
+ * Follow-up prompt for the id-repair turn: the previous response parsed
+ * as JSON, but some requested findings got no reconcilable verdict. Ask
+ * only for the missing ones, show which returned identifiers didn't
+ * match, and echo the unmatched verdicts back so the model mostly just
+ * has to fix the ID rather than restate its analysis.
+ */
+function buildRevalidateIdRepairPrompt(params: {
+  appliedCount: number;
+  missing: ExpectedFinding[];
+  unmatchedVerdicts: RevalidateVerdict[];
+}): string {
+  const { appliedCount, missing, unmatchedVerdicts } = params;
+
+  const missingList = missing
+    .map((e) => `- ${e.alias ?? e.findingId} — ${e.filePath} — "${e.title}"`)
+    .join("\n");
+
+  const unknownIdentifiers = unmatchedVerdicts
+    .map((v) => v.findingId ?? v.title ?? "")
+    .filter(Boolean)
+    .map((s) => `- ${JSON.stringify(s)}`)
+    .join("\n");
+  const unknownBlock = unknownIdentifiers
+    ? `\nThe following identifiers from your response could not be matched to any requested finding:\n\n${unknownIdentifiers}\n`
+    : "";
+
+  const nearMissBlock =
+    unmatchedVerdicts.length > 0
+      ? `\nThese verdicts from your previous response could not be matched. If one of them corresponds to a missing finding ID above, re-emit it with the corrected \`findingId\` — keep the verdict and reasoning as they were:\n\n\`\`\`json\n${JSON.stringify(
+          unmatchedVerdicts.map((v) => ({
+            findingId: v.findingId,
+            title: v.title,
+            verdict: v.verdict,
+            adjustedSeverity: v.adjustedSeverity,
+            duplicateOf: v.duplicateOf,
+            reasoning: v.reasoning,
+          })),
+          null,
+          2,
+        )}\n\`\`\`\n`
+      : "";
+
+  return `Your previous response was parsed, and ${appliedCount} verdict(s) were successfully matched to findings.
+
+The following required finding IDs are still missing a verdict:
+
+${missingList}
+${unknownBlock}${nearMissBlock}
+Return ONLY a JSON array containing verdicts for the missing Finding IDs listed above. Copy each \`findingId\` exactly as shown — do not invent or modify IDs. Preserve your previous conclusions; do not repeat the investigation and do not use tools.
+
+\`\`\`json
+[
+  {
+    "findingId": "F3",
+    "verdict": "true-positive" | "false-positive" | "fixed" | "uncertain" | "duplicate",
+    "adjustedSeverity": "HIGH",
+    "duplicateOf": "Finding ID of the primary finding (only when verdict is duplicate)",
+    "reasoning": "Your reasoning from before, compact."
+  }
+]
+\`\`\``;
+}
+
+/**
+ * In-session id-repair loop, shared by every agent plugin. After the
+ * initial revalidation response parses, reconcile it against the
+ * requested findings; while any finding is still missing a verdict, ask
+ * the SAME session (tool-free) for just the missing ones — up to
+ * `maxRepairs` times. The session still holds the full investigation
+ * context, so this recovers verdicts the model produced under a mangled
+ * identifier without re-running any analysis.
+ *
+ * Returns the merged verdict list (initial + repair turns; the
+ * reconciler's first-match-wins ordering means repaired verdicts only
+ * fill gaps, never displace an already-matched verdict) plus the raw
+ * responses for artifact logging.
+ */
+export async function* runRevalidateIdRepairLoop(params: {
+  expected: ExpectedFinding[];
+  verdicts: RevalidateVerdict[];
+  initialRawText: string;
+  followUp: ((prompt: string) => Promise<string | undefined>) | undefined;
+  agentLabel: string;
+  maxRepairs?: number;
+}): AsyncGenerator<
+  AgentProgress,
+  { verdicts: RevalidateVerdict[]; rawResponses: RevalidateRawResponse[]; repairAttempts: number }
+> {
+  const { expected, initialRawText, followUp, agentLabel, maxRepairs = 2 } = params;
+  let verdicts = params.verdicts;
+  const rawResponses: RevalidateRawResponse[] = [
+    { kind: "initial", rawText: initialRawText, parsedCount: verdicts.length },
+  ];
+  let repairAttempts = 0;
+
+  while (repairAttempts < maxRepairs) {
+    const rec = reconcileVerdicts(expected, verdicts);
+    if (rec.missing.length === 0) break;
+    if (!followUp) break;
+
+    repairAttempts++;
+    yield {
+      type: "thinking",
+      message: `${agentLabel}: ${rec.missing.length}/${expected.length} verdict(s) missing after reconciliation; requesting id-repair (attempt ${repairAttempts}/${maxRepairs})`,
+    };
+
+    const prompt = buildRevalidateIdRepairPrompt({
+      appliedCount: rec.matches.length,
+      missing: rec.missing,
+      unmatchedVerdicts: [...rec.unknown, ...rec.ambiguous],
+    });
+    const repairText = await followUp(prompt);
+    if (repairText === undefined) {
+      rawResponses.push({ kind: "id-repair", prompt, rawText: "(follow-up failed)" });
+      break;
+    }
+
+    let repairVerdicts: RevalidateVerdict[];
+    try {
+      repairVerdicts = parseRevalidateVerdicts(repairText);
+    } catch {
+      rawResponses.push({ kind: "id-repair", prompt, rawText: repairText });
+      yield {
+        type: "thinking",
+        message: `${agentLabel}: id-repair response was not parseable JSON; stopping repair`,
+      };
+      break;
+    }
+    rawResponses.push({
+      kind: "id-repair",
+      prompt,
+      rawText: repairText,
+      parsedCount: repairVerdicts.length,
+    });
+    if (repairVerdicts.length === 0) break;
+    verdicts = [...verdicts, ...repairVerdicts];
+  }
+
+  return { verdicts, rawResponses, repairAttempts };
 }
 
 export function formatJsonRepairFailureDebugText(originalText: string, repairText: string): string {
@@ -621,18 +777,29 @@ export function buildRevalidatePrompt(params: {
   projectRoot: string;
   projectInfo: string;
   force: boolean;
-}): { prompt: string; totalFindings: number } {
-  const { batch, projectRoot, projectInfo, force } = params;
+  /** See RevalidateParams.onlyFindingIds. */
+  onlyFindingIds?: ReadonlySet<string>;
+}): { prompt: string; totalFindings: number; expected: ExpectedFinding[] } {
+  const { batch, projectRoot, projectInfo, force, onlyFindingIds } = params;
+  const filterOpts = { force, onlyFindingIds };
+
+  // Single source of truth for identity AND aliases: the processor
+  // reconciles against expectedFindingsForBatch with the same inputs, so
+  // the short alias shown here ("F3") maps back to the same findingId on
+  // both sides.
+  const expected = expectedFindingsForBatch(batch, filterOpts);
+  const aliasById = new Map(expected.map((e) => [e.findingId, e.alias]));
 
   const fileSections: string[] = [];
 
   for (const file of batch) {
-    const findingsToCheck = file.findings.filter((f) => force || !f.revalidation);
+    const findingsToCheck = file.findings.filter((f) => shouldRevalidateFinding(f, filterOpts));
     if (findingsToCheck.length === 0) continue;
 
     const findingsList = findingsToCheck
       .map((f) => {
         return `### Finding: ${f.title}
+- **Finding ID:** ${aliasById.get(f.findingId!) ?? f.findingId}
 - **Severity:** ${f.severity}
 - **Slug:** ${f.vulnSlug}
 - **Lines:** ${f.lineNumbers.join(", ")}
@@ -666,10 +833,7 @@ export function buildRevalidatePrompt(params: {
     fileSections.push(`## File: ${file.filePath}\n\n${findingsList}\n${gitContext}`);
   }
 
-  const totalFindings = batch.reduce(
-    (s, f) => s + f.findings.filter((ff) => force || !ff.revalidation).length,
-    0,
-  );
+  const totalFindings = expected.length;
 
   const prompt = `You are a world-class security researcher performing an adversarial review of vulnerability findings. Your goal is to determine, with high confidence, whether each finding is real and exploitable. You must be thorough — incorrect verdicts here directly impact security decisions.
 
@@ -699,14 +863,14 @@ For EACH finding, perform ALL of these steps before rendering a verdict:
 - **false-positive** — Not exploitable. Name the specific mitigation.
 - **fixed** — Was real but has been patched. Cite the change.
 - **uncertain** — Can't determine. Explain what's ambiguous.
-- **duplicate** — This finding describes the **same underlying vulnerability** at the **same code location** as another finding in the **same file** (e.g., two matchers flagged the same line range from different angles, or the same auth bypass surfaced twice with different phrasing). Set \`duplicateOf\` to the exact \`title\` of the primary finding — the one that should keep the canonical verdict. Same vuln class in a different location is **not** a duplicate.
+- **duplicate** — This finding describes the **same underlying vulnerability** at the **same code location** as another finding in the **same file** (e.g., two matchers flagged the same line range from different angles, or the same auth bypass surfaced twice with different phrasing). Set \`duplicateOf\` to the Finding ID of the primary finding — the one that should keep the canonical verdict. Same vuln class in a different location is **not** a duplicate.
 
 If severity should change, set \`adjustedSeverity\`. Omit if correct.
 
 ### Duplicate rules (read carefully)
 
 - \`duplicate\` is only valid within a single file. Cross-file similarity does **not** count.
-- For any equivalence class of duplicates, **exactly one finding stays primary** with a real verdict (true-positive / false-positive / fixed / uncertain). The other(s) are \`duplicate\` with \`duplicateOf\` pointing at the primary's title.
+- For any equivalence class of duplicates, **exactly one finding stays primary** with a real verdict (true-positive / false-positive / fixed / uncertain). The other(s) are \`duplicate\` with \`duplicateOf\` pointing at the primary's Finding ID.
 - The primary you reference in \`duplicateOf\` **must itself have a non-duplicate verdict** in your output (or already in the file's prior revalidation). If you mark every member of a group as duplicate, all of them will be rejected.
 - Pick the primary as the most precise / highest-confidence statement of the issue. The duplicates should add context in their \`reasoning\`, not repeat the full analysis.
 
@@ -715,21 +879,24 @@ If severity should change, set \`adjustedSeverity\`. Omit if correct.
 \`\`\`json
 [
   {
-    "filePath": "exact/path/to/file.ts",
-    "title": "exact title from the finding",
+    "findingId": "the exact Finding ID from the finding, e.g. F3",
     "verdict": "true-positive" | "false-positive" | "fixed" | "uncertain" | "duplicate",
     "adjustedSeverity": "CRITICAL" | "HIGH" | "MEDIUM" | "HIGH_BUG" | "BUG",
-    "duplicateOf": "title of the primary finding (only when verdict is duplicate)",
+    "duplicateOf": "Finding ID of the primary finding (only when verdict is duplicate)",
     "reasoning": "Detailed explanation (5-10 sentences). Show your work."
   }
 ]
 \`\`\`
 
-**Include \`filePath\` for every verdict** so we can match verdicts to the correct file. \`adjustedSeverity\` is optional. \`duplicateOf\` is required iff \`verdict === "duplicate"\` and is otherwise ignored.
+You must return exactly one verdict for every Finding ID below:
+
+${expected.map((e) => `- ${e.alias ?? e.findingId} — "${e.title}"`).join("\n")}
+
+**Copy each \`findingId\` exactly as shown. Do not invent or modify IDs.** The Finding ID — not the title — is how verdicts are matched back to findings. \`adjustedSeverity\` is optional. \`duplicateOf\` is required iff \`verdict === "duplicate"\` and is otherwise ignored; it must also be a Finding ID.
 
 **Your reasoning is the most important part.** A verdict without thorough reasoning is worthless.`;
 
-  return { prompt, totalFindings };
+  return { prompt, totalFindings, expected };
 }
 
 export function parseRevalidateVerdicts(resultText: string): RevalidateVerdict[] {

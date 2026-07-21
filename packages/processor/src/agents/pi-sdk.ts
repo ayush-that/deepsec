@@ -34,6 +34,7 @@ import {
   parseRevalidateVerdicts,
   QuotaExhaustedError,
   REFUSAL_FOLLOWUP_PROMPT,
+  runRevalidateIdRepairLoop,
   writeParseFailureDebug,
 } from "./shared.js";
 import type {
@@ -45,6 +46,7 @@ import type {
   InvestigateResult,
   RevalidateOutput,
   RevalidateParams,
+  RevalidateRawResponse,
   RevalidateVerdict,
 } from "./types.js";
 
@@ -912,14 +914,24 @@ export class PiAgentPlugin implements AgentPlugin {
   }
 
   async *revalidate(params: RevalidateParams): AsyncGenerator<AgentProgress, RevalidateOutput> {
-    const { batch, projectRoot, projectInfo, config, force = false, signal, projectId } = params;
+    const {
+      batch,
+      projectRoot,
+      projectInfo,
+      config,
+      force = false,
+      onlyFindingIds,
+      signal,
+      projectId,
+    } = params;
     const cfg = readConfig(config);
     const maxTurns = cfg.maxTurns ?? 150;
-    const { prompt, totalFindings } = buildRevalidatePrompt({
+    const { prompt, totalFindings, expected } = buildRevalidatePrompt({
       batch,
       projectRoot,
       projectInfo,
       force,
+      onlyFindingIds: onlyFindingIds ? new Set(onlyFindingIds) : undefined,
     });
     const startTime = Date.now();
 
@@ -990,6 +1002,8 @@ export class PiAgentPlugin implements AgentPlugin {
     }
 
     const durationMs = Date.now() - startTime;
+    const preResponses: RevalidateRawResponse[] = [];
+    const jsonRepairPrompt = buildRevalidateJsonRepairPrompt(expected);
     let verdicts: RevalidateVerdict[];
     try {
       verdicts = parseRevalidateVerdicts(resultText);
@@ -998,11 +1012,7 @@ export class PiAgentPlugin implements AgentPlugin {
         type: "thinking",
         message: "Pi returned non-JSON revalidation output; requesting JSON-only repair",
       };
-      const repairText = await runToollessFollowUp(
-        session,
-        buildRevalidateJsonRepairPrompt(),
-        signal,
-      );
+      const repairText = await runToollessFollowUp(session, jsonRepairPrompt, signal);
       if (repairText === undefined) {
         writeParseFailureDebug({
           projectId,
@@ -1017,6 +1027,7 @@ export class PiAgentPlugin implements AgentPlugin {
       }
       try {
         verdicts = parseRevalidateVerdicts(repairText);
+        preResponses.push({ kind: "json-repair", prompt: jsonRepairPrompt, rawText: resultText });
         resultText = repairText;
         yield { type: "thinking", message: "Pi JSON repair succeeded" };
       } catch (repairErr) {
@@ -1033,6 +1044,18 @@ export class PiAgentPlugin implements AgentPlugin {
         throw combinedError;
       }
     }
+
+    // Id-repair against the still-live in-memory Pi session (must run
+    // before dispose()).
+    const liveSession = session;
+    const repair = yield* runRevalidateIdRepairLoop({
+      expected,
+      verdicts,
+      initialRawText: resultText,
+      followUp: liveSession ? (p) => runToollessFollowUp(liveSession, p, signal) : undefined,
+      agentLabel: "Pi",
+    });
+    verdicts = repair.verdicts;
 
     const refusal = await runRefusalFollowUp(session, signal);
     if (refusal?.refused) {
@@ -1052,6 +1075,8 @@ export class PiAgentPlugin implements AgentPlugin {
     return {
       verdicts,
       meta: { durationMs, ...sdkMeta, refusal },
+      rawResponses: [...preResponses, ...repair.rawResponses],
+      repairAttempts: repair.repairAttempts,
     };
   }
 }

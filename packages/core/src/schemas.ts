@@ -35,6 +35,9 @@ export const revalidationSchema = z.object({
 });
 
 export const findingSchema = z.object({
+  // Stable deterministic identity (`finding_<sha256 prefix>`). Optional
+  // for records written before the field existed; backfilled on load.
+  findingId: z.string().optional(),
   severity: z.enum(["CRITICAL", "HIGH", "MEDIUM", "HIGH_BUG", "BUG", "LOW"]),
   vulnSlug: z.string(),
   title: z.string(),

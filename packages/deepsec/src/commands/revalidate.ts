@@ -32,6 +32,10 @@ function logProgress(progress: {
           console.log(`  ${GREEN}${ap.message}${RESET}`);
         } else if (ap.type === "error") {
           console.log(`  ${RED}${ap.message}${RESET}`);
+        } else if (ap.type === "thinking") {
+          // Reconciliation / id-repair / split-retry status lives on
+          // "thinking" progress events — surface it dimly.
+          console.log(`  ${DIM}${ap.message}${RESET}`);
         }
         break;
       }
@@ -123,6 +127,9 @@ export async function revalidateCommand(opts: {
   console.log(
     `  ${GREEN}TP: ${result.truePositives}${RESET}  ${RED}FP: ${result.falsePositives}${RESET}  ${CYAN}Fixed: ${result.fixed}${RESET}  ${YELLOW}Uncertain: ${result.uncertain}${RESET}${dupeStr}`,
   );
+  console.log(
+    `  ${DIM}Persisted ${result.revalidated}/${result.requested} requested verdicts${RESET}`,
+  );
   if (result.quotaExhausted) {
     console.log(
       renderQuotaMessage({
@@ -131,6 +138,22 @@ export async function revalidateCommand(opts: {
         command: "revalidate",
         projectId,
       }),
+    );
+    process.exit(1);
+  }
+  if (result.unresolved.length > 0) {
+    console.log();
+    console.log(
+      `${RED}${result.unresolved.length} finding(s) did not receive a verdict after repair and split retries:${RESET}`,
+    );
+    for (const u of result.unresolved.slice(0, 20)) {
+      console.log(`  ${RED}-${RESET} ${u.filePath} ${DIM}${u.findingId}${RESET} "${u.title}"`);
+    }
+    if (result.unresolved.length > 20) {
+      console.log(`  ${DIM}… and ${result.unresolved.length - 20} more${RESET}`);
+    }
+    console.log(
+      `  ${DIM}Raw responses + reconciliation diagnostics: data/${projectId}/revalidation/${result.runId}/${RESET}`,
     );
     process.exit(1);
   }

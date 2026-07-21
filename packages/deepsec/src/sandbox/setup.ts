@@ -793,32 +793,32 @@ for CANDIDATE in \\
     if [ -f "$DIR/package.json" ]; then
       VER=$(node -p "require('$DIR/package.json').version" 2>/dev/null || true)
       # Skip platform-suffixed packages (e.g. 0.144.0-darwin-arm64).
-      case "\$VER" in
+      case "$VER" in
         *-linux-*|*-darwin-*|*-win32-*) continue ;;
       esac
-      if [ -n "\$VER" ]; then
-        SDK_VER="\$VER"
+      if [ -n "$VER" ]; then
+        SDK_VER="$VER"
         # Absolute path — the alias step below runs after cd'ing elsewhere.
-        CODEX_PKG_DIR="\$(cd "\$DIR" && pwd)"
+        CODEX_PKG_DIR="$(cd "$DIR" && pwd)"
         break 2
       fi
     fi
   done
 done
-if [ -z "\$SDK_VER" ]; then
+if [ -z "$SDK_VER" ]; then
   echo "Could not detect Codex CLI version"
   exit 1
 fi
-echo "Detected Codex CLI version: \$SDK_VER"
+echo "Detected Codex CLI version: $SDK_VER"
 
 # Map sandbox arch to platform package + vendor triple
 UNAME_M=$(uname -m)
-case "\$UNAME_M" in
+case "$UNAME_M" in
   x86_64) ARCH=x64; TRIPLE=x86_64-unknown-linux-musl ;;
   aarch64|arm64) ARCH=arm64; TRIPLE=aarch64-unknown-linux-musl ;;
-  *) echo "Unsupported arch: \$UNAME_M"; exit 1 ;;
+  *) echo "Unsupported arch: $UNAME_M"; exit 1 ;;
 esac
-echo "  Sandbox arch: \$UNAME_M (linux-\${ARCH}, \$TRIPLE)"
+echo "  Sandbox arch: $UNAME_M (linux-\${ARCH}, $TRIPLE)"
 
 # The platform package's actual published version is "<sdk_ver>-linux-<arch>".
 # pnpm aliases it as @openai/codex-linux-<arch> → @openai/codex@<ver>-linux-<arch>.
@@ -863,13 +863,13 @@ ALIAS_TARGETS=(
   "${DEEPSEC_DIR}/node_modules/.pnpm/@openai+codex@\${SDK_VER}/node_modules/\${PLATFORM_ALIAS}"
   "${DEEPSEC_DIR}/node_modules/\${PLATFORM_ALIAS}"
 )
-if [ -n "\$CODEX_PKG_DIR" ]; then
+if [ -n "$CODEX_PKG_DIR" ]; then
   ALIAS_TARGETS+=("\${CODEX_PKG_DIR}/node_modules/\${PLATFORM_ALIAS}")
 fi
 for ALIAS in "\${ALIAS_TARGETS[@]}"; do
-  mkdir -p "\$(dirname "\$ALIAS")"
-  ln -sfn "\${STORE_DEST}" "\$ALIAS"
-  echo "    → alias \$ALIAS"
+  mkdir -p "$(dirname "$ALIAS")"
+  ln -sfn "\${STORE_DEST}" "$ALIAS"
+  echo "    → alias $ALIAS"
 done
 rm -rf /tmp/codex-native-fetch
 `;
