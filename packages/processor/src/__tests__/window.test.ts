@@ -2,7 +2,23 @@ import { pathRiskCategories } from "@deepsec/scanner";
 import { describe, expect, it } from "vitest";
 import { introducedFindings } from "../window/focus.js";
 import { parsePrNumbersFromSubject } from "../window/pull-requests.js";
-import { addedLineNumbers, splitUnifiedDiff } from "../window/resolve-window.js";
+import {
+  addedLineNumbers,
+  durationToGitSince,
+  splitUnifiedDiff,
+} from "../window/resolve-window.js";
+
+describe("durationToGitSince", () => {
+  it("converts the Nd day shorthand to a git --since string", () => {
+    expect(durationToGitSince("1d")).toBe("1 days ago");
+    expect(durationToGitSince("30d")).toBe("30 days ago");
+    expect(durationToGitSince(" 7d ")).toBe("7 days ago");
+  });
+  it("passes raw git approxidate strings through unchanged", () => {
+    expect(durationToGitSince("1 month ago")).toBe("1 month ago");
+    expect(durationToGitSince("2026-06-01")).toBe("2026-06-01");
+  });
+});
 
 describe("pathRiskCategories", () => {
   it("classifies by path convention, not content", () => {

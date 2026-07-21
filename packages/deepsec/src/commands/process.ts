@@ -139,7 +139,7 @@ export async function processCommand(opts: {
   /** Resolve the window + scan, print what would be investigated, then stop (zero AI). */
   dryRun?: boolean;
   /** With --duration: expand the deep set by blast radius (reverse-import graph). Opt-in. */
-  withGraph?: boolean;
+  graph?: boolean;
   /** Commander `--no-external` sets this false; default true. */
   external?: boolean;
 }) {
@@ -219,9 +219,9 @@ async function processWindowMode(opts: Parameters<typeof processCommand>[0]) {
           .filePaths
       : [];
 
-  // Blast radius (opt-in --with-graph): risk-path importers of the changed files.
+  // Blast radius (on by default, --no-graph to skip): risk-path importers of the changed files.
   const BLAST_CAP = 50;
-  const blastAll = opts.withGraph ? await expandByBlastRadius({ root, changedFiles }) : [];
+  const blastAll = opts.graph !== false ? await expandByBlastRadius({ root, changedFiles }) : [];
   const changedSet = new Set(changedFiles);
   // Drop ignored importers (tests/dist) via the same filter as the changed set.
   const blastCandidates = blastAll.filter((h) => !changedSet.has(h.filePath));

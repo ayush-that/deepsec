@@ -48,12 +48,23 @@ export function runGit(root: string, args: string[]): { status: number; stdout: 
 }
 
 /**
+ * Turn the `--duration` value into a git --since string. The primary form is a
+ * day count ("7d", "30d"); raw git approxidate strings ("1 month ago") pass
+ * through unchanged. `Nd` is converted because git doesn't parse a bare "30d".
+ */
+export function durationToGitSince(input: string): string {
+  const m = /^\s*(\d+)\s*d\s*$/i.exec(input);
+  return m ? `${m[1]} days ago` : input;
+}
+
+/**
  * Resolve a change window against the default branch (the merged-to-main view
  * — "what shipped last month", not in-flight branches). Runs entirely
  * host-side; the sandbox strips .git so this must complete before dispatch.
  */
 export function resolveWindow(params: { root: string; since: string }): WindowResolution {
-  const { root, since } = params;
+  const { root } = params;
+  const since = durationToGitSince(params.since);
   const defaultBranch = resolveDefaultBranch(root);
 
   // Shallow clones truncate the window silently (ref resolves, log exits 0) — surface it.

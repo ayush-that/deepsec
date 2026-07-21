@@ -208,7 +208,7 @@ program
   )
   .option(
     "--duration <window>",
-    'Window mode: full scan + process over the whole repo, with changes on the default branch since <window> (any git --since string, e.g. "1 month") investigated deeper. Mutually exclusive with --diff*/--files*.',
+    'Window mode: full scan + process over the whole repo, with changes on the default branch since <window> investigated deeper. <window> is a day count like "7d" or "30d" (raw git --since strings such as "1 month ago" also work). Mutually exclusive with --diff*/--files*.',
   )
   .option(
     "--diff-scan",
@@ -219,8 +219,8 @@ program
     "Resolve the window and scan (both regex-only), print which files would get the deep vs standard pass, then stop before any AI investigation. Zero spend.",
   )
   .option(
-    "--with-graph",
-    "With --duration: expand the deep set by blast radius (files that import the changed ones, via a reverse-import graph). Opt-in; adds a whole-repo read pass.",
+    "--no-graph",
+    "With --duration: skip blast-radius expansion. Blast radius (files that import the changed ones, via a reverse-import graph) is ON by default; this disables it and the extra whole-repo read pass.",
   )
   .option(
     "--no-external",
@@ -238,7 +238,7 @@ program
   .option("--run-id <id>", "Filter to a specific run's results")
   .option(
     "--duration <window>",
-    'Add an "Introduced in the last <window>" section: findings whose line falls inside changes on the default branch since <window> (any git --since string).',
+    'Add an "Introduced in the last <window>" section: findings whose line falls inside changes on the default branch since <window>. <window> is a day count like "7d" or "30d" (raw git --since strings also work).',
   )
   .option(
     "--require-human-ack",
