@@ -82,6 +82,27 @@ export function runMetaPath(projectId: string, runId: string): string {
   return path.join(runsDir(projectId), runId + ".json");
 }
 
+// --- Window plans (process --duration) ---
+
+export function windowsDir(projectId: string): string {
+  return path.join(dataDir(projectId), "windows");
+}
+
+export function windowPlanJsonPath(projectId: string, windowId: string): string {
+  assertSafeSegment(windowId, "windowId");
+  return path.join(windowsDir(projectId), windowId + ".json");
+}
+
+export function windowPlanMdPath(projectId: string, windowId: string): string {
+  assertSafeSegment(windowId, "windowId");
+  return path.join(windowsDir(projectId), windowId + ".md");
+}
+
+/** Codebase-specific risk-path config, written once by the RISK-SETUP bootstrap. */
+export function riskPathsPath(projectId: string): string {
+  return path.join(dataDir(projectId), "risk-paths.json");
+}
+
 // --- Reports ---
 
 export function reportsDir(projectId: string): string {

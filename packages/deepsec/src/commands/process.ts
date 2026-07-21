@@ -1,10 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import { ensureProject, readProjectConfig } from "@deepsec/core";
-import { process as processRun } from "@deepsec/processor";
-import { scanFiles } from "@deepsec/scanner";
+import { ensureProject, loadAllFileRecords, readProjectConfig } from "@deepsec/core";
+import {
+  expandByBlastRadius,
+  introducedFindings,
+  process as processRun,
+  resolveWindowFocus,
+} from "@deepsec/processor";
+import { scan, scanFiles } from "@deepsec/scanner";
 import { buildAgentConfig } from "../agent-config.js";
 import { defaultModelForAgent } from "../agent-defaults.js";
+import { crossCheckExternalFindings, externalScanPlan, runExternals } from "../external-scan.js";
 import { resolveFiles } from "../file-sources.js";
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../formatters.js";
 import { renderPrComment } from "../pr-comment.js";
@@ -75,6 +81,27 @@ function parseCsv(v: string | undefined): string[] | undefined {
   return parts.length > 0 ? parts : undefined;
 }
 
+/** Post-review cross-check of the deterministic scanners (unless --no-external). Shared by all modes. */
+/** Returns the number of findings the cross-check confirmed (0 when disabled/none). */
+async function maybeCrossCheck(
+  opts: { external?: boolean; concurrency?: number; batchSize?: number },
+  projectId: string,
+  agentType: string,
+  config: Record<string, unknown>,
+  rootPath: string,
+): Promise<number> {
+  if (opts.external === false) return 0;
+  return crossCheckExternalFindings({
+    projectId,
+    agentType,
+    config,
+    rootPathOverride: rootPath,
+    concurrency: opts.concurrency,
+    batchSize: opts.batchSize,
+    onProgress: logProgress,
+  });
+}
+
 export async function processCommand(opts: {
   projectId?: string;
   runId?: string;
@@ -105,6 +132,16 @@ export async function processCommand(opts: {
   /** Commander auto-injects this from `--no-ignore` (default true). */
   ignore?: boolean;
   commentOut?: string;
+  // Window mode
+  duration?: string;
+  /** With --duration: scope investigation to the window's changed files only. */
+  diffScan?: boolean;
+  /** Resolve the window + scan, print what would be investigated, then stop (zero AI). */
+  dryRun?: boolean;
+  /** With --duration: expand the deep set by blast radius (reverse-import graph). Opt-in. */
+  withGraph?: boolean;
+  /** Commander `--no-external` sets this false; default true. */
+  external?: boolean;
 }) {
   const isDirectMode =
     opts.diff !== undefined ||
@@ -113,10 +150,205 @@ export async function processCommand(opts: {
     !!opts.files ||
     !!opts.filesFrom;
 
+  // --diff-scan: window-scoped investigation (only changed files). Requires
+  // --duration and is exclusive with the whole-repo direct sources.
+  if (opts.diffScan) {
+    if (opts.duration === undefined) {
+      throw new Error("--diff-scan requires --duration (the window to scope to).");
+    }
+    if (isDirectMode) {
+      throw new Error("--diff-scan is mutually exclusive with --diff*/--files*. Pick one mode.");
+    }
+    return processDiffScanMode(opts);
+  }
+
+  if (opts.duration !== undefined) {
+    if (isDirectMode) {
+      throw new Error("--duration is mutually exclusive with --diff*/--files*. Pick one mode.");
+    }
+    return processWindowMode(opts);
+  }
+
   if (isDirectMode) {
     return processDirectMode(opts);
   }
+  // Standard mode has no window/file preview to show; --dry-run there would
+  // otherwise fall through to a full billed run — the opposite of its intent.
+  if (opts.dryRun) {
+    throw new Error(
+      "--dry-run requires --duration, --diff-scan, or a --diff*/--files* source (nothing to preview in standard mode).",
+    );
+  }
   return processStandardMode(opts);
+}
+
+/**
+ * Window mode (process --duration): full scan + process over the whole repo,
+ * with window-changed files investigated deeper (deep pass at full thinking, the
+ * rest at medium). The "introduced" report section comes from `report --duration`.
+ */
+async function processWindowMode(opts: Parameters<typeof processCommand>[0]) {
+  const { projectId, rootPath, autoCreated } = resolveProjectIdForDirect(opts.projectId, opts.root);
+  ensureProject(projectId, rootPath);
+  const root = rootPath;
+  const since = opts.duration as string;
+  const agentType = resolveAgentType(opts.agent);
+  const model = opts.model ?? defaultModelForAgent(agentType);
+  // A dry run never calls the agent — don't require a credential to preview.
+  if (!opts.dryRun) assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
+
+  // Window files: full thinking; rest of repo: medium — so focus is always deeper.
+  const focusThinking = opts.thinkingLevel ?? "xhigh";
+  const baseThinking = "medium";
+  const focusConfig = buildAgentConfig({ ...opts, model, thinkingLevel: focusThinking });
+  const baseConfig = buildAgentConfig({ ...opts, model, thinkingLevel: baseThinking });
+
+  console.log(`${BOLD}Window mode${RESET} project ${BOLD}${projectId}${RESET}`);
+  if (autoCreated) console.log(`  ${DIM}Auto-created project at ${rootPath}${RESET}`);
+  console.log(`  Duration: ${since}`);
+  console.log(`  Root: ${root}`);
+  console.log(`  Agent: ${agentType} (${model})`);
+  console.log(`  Thinking: window=${focusThinking}, rest=${baseThinking}`);
+  console.log();
+
+  // Resolve the window (host-side; sandbox strips .git), ignore-filter the changed set.
+  const focus = await resolveWindowFocus({ root, since });
+  const changedFiles =
+    focus.focusFiles.length > 0
+      ? resolveFiles({ rootPath, files: focus.focusFiles, noIgnore: opts.ignore === false })
+          .filePaths
+      : [];
+
+  // Blast radius (opt-in --with-graph): risk-path importers of the changed files.
+  const BLAST_CAP = 50;
+  const blastAll = opts.withGraph ? await expandByBlastRadius({ root, changedFiles }) : [];
+  const changedSet = new Set(changedFiles);
+  // Drop ignored importers (tests/dist) via the same filter as the changed set.
+  const blastCandidates = blastAll.filter((h) => !changedSet.has(h.filePath));
+  const keptBlast = new Set(
+    blastCandidates.length > 0
+      ? resolveFiles({
+          rootPath,
+          files: blastCandidates.map((h) => h.filePath),
+          noIgnore: opts.ignore === false,
+        }).filePaths
+      : [],
+  );
+  const kept = blastCandidates.filter((h) => keptBlast.has(h.filePath));
+  const blast = kept.slice(0, BLAST_CAP);
+  const deepFiles = [...new Set([...changedFiles, ...blast.map((h) => h.filePath)])];
+
+  console.log(
+    `  Window ${focus.windowId} on ${focus.defaultBranch}: ${focus.commitCount} commit(s), ${changedFiles.length} changed file(s)${blast.length ? ` + ${blast.length} via blast radius` : ""}`,
+  );
+  if (kept.length > BLAST_CAP) {
+    console.log(
+      `  ${YELLOW}blast radius capped at ${BLAST_CAP} (${kept.length} risk-relevant importers found)${RESET}`,
+    );
+  }
+  if (focus.shallow) {
+    console.log(
+      `  ${YELLOW}⚠ shallow clone — window may be truncated; run 'git fetch --unshallow' for a complete window.${RESET}`,
+    );
+  }
+  console.log();
+
+  // Full scan (regex, no AI). scanFiles gives every deep file a record so the
+  // deep pass investigates it even with no candidates.
+  const extPlan = externalScanPlan(projectId, opts);
+  console.log(`${BOLD}Scanning whole repo…${RESET}`);
+  await scan({ projectId, root, skipMatcherSlugs: extPlan.skipMatcherSlugs });
+  if (deepFiles.length > 0) {
+    await scanFiles({
+      projectId,
+      root,
+      filePaths: deepFiles,
+      source: `window-focus:${since}`,
+      skipMatcherSlugs: extPlan.skipMatcherSlugs,
+    });
+  }
+  // External scanners (trufflehog/semgrep) over the whole repo → candidates.
+  runExternals(projectId, root, extPlan);
+  console.log();
+
+  if (opts.dryRun) {
+    // Standard set = remaining pending candidates (deep files excluded; the deep
+    // pass runs first). Only needed for this preview — the real standard pass
+    // re-selects internally.
+    const deepSet = new Set(deepFiles);
+    const standardFiles = loadAllFileRecords(projectId).filter(
+      (r) =>
+        (r.status === "pending" || r.status === "error") &&
+        !deepSet.has(r.filePath) &&
+        r.candidates.length > 0,
+    );
+    console.log(`${BOLD}Dry run${RESET} — window + scan resolved, no AI investigation.`);
+    console.log(
+      `  ${BOLD}Deep pass${RESET} (${focusThinking}): ${deepFiles.length} file(s) — ${changedFiles.length} changed + ${blast.length} blast radius`,
+    );
+    for (const f of changedFiles.slice(0, 12)) console.log(`    ${DIM}${f}${RESET}`);
+    if (changedFiles.length > 12)
+      console.log(`    ${DIM}… and ${changedFiles.length - 12} more changed${RESET}`);
+    for (const h of blast.slice(0, 12))
+      console.log(`    ${DIM}${h.filePath} ← imports ${h.viaChangedFile} [${h.riskCategories.join(",")}]${RESET}`);
+    if (blast.length > 12) console.log(`    ${DIM}… and ${blast.length - 12} more blast radius${RESET}`);
+    console.log(
+      `  ${BOLD}Standard pass${RESET} (${baseThinking}): ${standardFiles.length} repo candidate file(s)`,
+    );
+    for (const r of standardFiles.slice(0, 12)) console.log(`    ${DIM}${r.filePath}${RESET}`);
+    if (standardFiles.length > 12)
+      console.log(`    ${DIM}… and ${standardFiles.length - 12} more${RESET}`);
+    console.log();
+    console.log(`${GREEN}Dry run complete — zero AI spend.${RESET}`);
+    return;
+  }
+
+  // Deep pass first (forced, full thinking) so the standard pass skips these.
+  if (deepFiles.length > 0) {
+    console.log(
+      `${BOLD}Deep pass:${RESET} ${deepFiles.length} file(s) — ${changedFiles.length} changed + ${blast.length} blast radius (${focusThinking})`,
+    );
+    await processRun({
+      projectId,
+      agentType,
+      config: focusConfig,
+      filePaths: deepFiles,
+      source: `window-focus:${since}`,
+      concurrency: opts.concurrency,
+      batchSize: opts.batchSize,
+      rootPathOverride: root,
+      onProgress: logProgress,
+    });
+    console.log();
+  }
+
+  // 4. Standard pass over the rest of the repo's candidates.
+  console.log(`${BOLD}Standard pass:${RESET} remaining repo candidates (${baseThinking})`);
+  const baseResult = await processRun({
+    projectId,
+    agentType,
+    config: baseConfig,
+    concurrency: opts.concurrency,
+    batchSize: opts.batchSize,
+    rootPathOverride: root,
+    onProgress: logProgress,
+  });
+
+  // Cross-check the deterministic scanners against the review (targeted triage).
+  await maybeCrossCheck(opts, projectId, agentType, baseConfig, root);
+
+  // 5. Summarize what landed inside the window (line-level).
+  const records = loadAllFileRecords(projectId);
+  const introduced = introducedFindings(records, focus.addedLinesByFile);
+  console.log();
+  console.log(`${GREEN}Window run complete.${RESET} Run: ${BOLD}${baseResult.runId}${RESET}`);
+  console.log(
+    `  ${BOLD}${introduced.length}${RESET} finding(s) introduced in the last ${since} (line inside the window's changes)`,
+  );
+  console.log(`Next:`);
+  console.log(
+    `${DIM}pnpm deepsec report --project-id ${projectId} --duration ${JSON.stringify(since)}${RESET}`,
+  );
 }
 
 async function processStandardMode(opts: Parameters<typeof processCommand>[0]) {
@@ -183,6 +415,10 @@ async function processStandardMode(opts: Parameters<typeof processCommand>[0]) {
     skipSlugs,
     onProgress: logProgress,
   });
+
+  // Cross-check the deterministic scanners (from a prior `scan`) against the
+  // review — targeted triage of anything the review didn't cover.
+  await maybeCrossCheck(opts, projectId, agentType, agentConfig, effectiveRoot);
 
   console.log(`${GREEN}Processing complete.${RESET} Run: ${BOLD}${result.runId}${RESET}`);
   console.log(`  Analyses: ${result.analysisCount}`);
@@ -272,11 +508,6 @@ async function processDirectMode(opts: Parameters<typeof processCommand>[0]) {
   // the rootPath in data/<id>/project.json).
   ensureProject(projectId, rootPath);
 
-  const agentType = resolveAgentType(opts.agent);
-  const model = opts.model ?? defaultModelForAgent(agentType);
-  const agentConfig = buildAgentConfig({ ...opts, model });
-  assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
-
   // Resolve the file list.
   const resolved = resolveFiles({
     rootPath,
@@ -289,35 +520,122 @@ async function processDirectMode(opts: Parameters<typeof processCommand>[0]) {
     noIgnore: opts.ignore === false,
   });
 
-  console.log(`${BOLD}Direct process${RESET} project ${BOLD}${projectId}${RESET}`);
+  await runScopedInvestigation({
+    projectId,
+    rootPath,
+    autoCreated,
+    filePaths: resolved.filePaths,
+    sourceLabel: resolved.sourceLabel,
+    headerLabel: "Direct process",
+    opts,
+  });
+}
+
+/**
+ * Diff-scan mode (--diff-scan --duration): investigate ONLY the window's changed
+ * files, CI-style (same exit codes as direct mode). Deleted files are noted, not
+ * investigated (content is gone).
+ */
+async function processDiffScanMode(opts: Parameters<typeof processCommand>[0]) {
+  const { projectId, rootPath, autoCreated } = resolveProjectIdForDirect(opts.projectId, opts.root);
+  ensureProject(projectId, rootPath);
+  const since = opts.duration as string;
+
+  console.log(`  ${DIM}Resolving window (${since})…${RESET}`);
+  const focus = await resolveWindowFocus({ root: rootPath, since });
+  if (focus.shallow) {
+    console.log(
+      `  ${YELLOW}⚠ shallow clone — window may be truncated; run 'git fetch --unshallow'.${RESET}`,
+    );
+  }
+  if (focus.deletedFiles.length > 0) {
+    console.log(
+      `  ${DIM}${focus.deletedFiles.length} file(s) deleted in window — not investigated (content removed).${RESET}`,
+    );
+  }
+
+  // Reuse resolveFiles purely for its ignore filter over the changed set.
+  const filePaths =
+    focus.focusFiles.length > 0
+      ? resolveFiles({ rootPath, files: focus.focusFiles, noIgnore: opts.ignore === false })
+          .filePaths
+      : [];
+
+  await runScopedInvestigation({
+    projectId,
+    rootPath,
+    autoCreated,
+    filePaths,
+    sourceLabel: `window-diff:${since}`,
+    headerLabel: "Diff-scan process",
+    opts,
+  });
+}
+
+/**
+ * Shared scoped investigation core: scan an exact file list, investigate it, and
+ * apply CI exit codes + optional PR comment. Used by both direct mode (the
+ * --diff / --files sources) and diff-scan mode (--diff-scan --duration).
+ */
+async function runScopedInvestigation(params: {
+  projectId: string;
+  rootPath: string;
+  autoCreated: boolean;
+  filePaths: string[];
+  sourceLabel: string;
+  headerLabel: string;
+  opts: Parameters<typeof processCommand>[0];
+}) {
+  const { projectId, rootPath, autoCreated, filePaths, sourceLabel, headerLabel, opts } = params;
+
+  const agentType = resolveAgentType(opts.agent);
+  const model = opts.model ?? defaultModelForAgent(agentType);
+  const agentConfig = buildAgentConfig({ ...opts, model });
+  // A dry run never calls the agent — don't require a credential to preview.
+  if (!opts.dryRun) assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
+
+  console.log(`${BOLD}${headerLabel}${RESET} project ${BOLD}${projectId}${RESET}`);
   if (autoCreated) {
     console.log(`  ${DIM}Auto-created project at ${rootPath}${RESET}`);
   }
-  console.log(`  Source: ${resolved.sourceLabel}`);
-  console.log(`  Files: ${resolved.filePaths.length}`);
+  console.log(`  Source: ${sourceLabel}`);
+  console.log(`  Files: ${filePaths.length}`);
   console.log(`  Agent: ${agentType} (${model})`);
   console.log(`  Root: ${rootPath}`);
   console.log();
 
-  if (resolved.filePaths.length === 0) {
-    console.log(`${YELLOW}No files matched ${resolved.sourceLabel} (after ignore filter).${RESET}`);
+  if (filePaths.length === 0) {
+    console.log(`${YELLOW}No files matched ${sourceLabel} (after ignore filter).${RESET}`);
     console.log(`${GREEN}Nothing to process — exit 0.${RESET}`);
     return;
   }
 
   // Scan the listed files first to gather signals. Records get written
   // for every file, even those with no matcher hits.
-  console.log(`${BOLD}Scanning ${resolved.filePaths.length} file(s)…${RESET}`);
+  const extPlan = externalScanPlan(projectId, opts);
+  console.log(`${BOLD}Scanning ${filePaths.length} file(s)…${RESET}`);
   const scanResult = await scanFiles({
     projectId,
     root: rootPath,
-    filePaths: resolved.filePaths,
-    source: resolved.sourceLabel,
+    filePaths,
+    source: sourceLabel,
+    skipMatcherSlugs: extPlan.skipMatcherSlugs,
   });
   console.log(
     `  ${DIM}${scanResult.candidateCount} candidate(s) across ${scanResult.filesScanned} file(s)${RESET}`,
   );
+  // External scanners (trufflehog/semgrep), scoped to the changed set → candidates.
+  runExternals(projectId, rootPath, extPlan, filePaths);
   console.log();
+
+  if (opts.dryRun) {
+    console.log(`${BOLD}Dry run${RESET} — would investigate ${filePaths.length} file(s), no AI:`);
+    for (const f of filePaths.slice(0, 20)) console.log(`  ${DIM}${f}${RESET}`);
+    if (filePaths.length > 20) console.log(`  ${DIM}… and ${filePaths.length - 20} more${RESET}`);
+    console.log();
+    console.log(`${GREEN}Dry run complete — zero AI spend.${RESET}`);
+    return;
+  }
 
   // Now investigate. process() loads the records scanFiles wrote.
   const result = await processRun({
@@ -328,14 +646,20 @@ async function processDirectMode(opts: Parameters<typeof processCommand>[0]) {
     concurrency: opts.concurrency,
     batchSize: opts.batchSize,
     rootPathOverride: rootPath,
-    filePaths: resolved.filePaths,
-    source: resolved.sourceLabel,
+    filePaths,
+    source: sourceLabel,
     onProgress: logProgress,
   });
 
+  // Cross-check the deterministic scanners against the review (targeted triage).
+  // Its confirmations count toward the CI gate below (a secret only trufflehog
+  // caught still fails the build).
+  const crossCheckFindings = await maybeCrossCheck(opts, projectId, agentType, agentConfig, rootPath);
+  const findingCount = result.findingCount + crossCheckFindings;
+
   console.log(`${GREEN}Processing complete.${RESET} Run: ${BOLD}${result.runId}${RESET}`);
   console.log(`  Analyses: ${result.analysisCount}`);
-  console.log(`  Findings: ${result.findingCount}`);
+  console.log(`  Findings: ${findingCount}`);
   if (result.errorBatchCount > 0) {
     console.log(`  ${RED}Errored batches: ${result.errorBatchCount}${RESET}`);
   }
@@ -367,11 +691,7 @@ async function processDirectMode(opts: Parameters<typeof processCommand>[0]) {
   // Optionally write a PR-comment-shaped markdown for the workflow to
   // pass to github-script.
   if (opts.commentOut && result.findingCount > 0) {
-    const md = renderPrComment({
-      projectId,
-      runId: result.runId,
-      source: resolved.sourceLabel,
-    });
+    const md = renderPrComment({ projectId, runId: result.runId, source: sourceLabel });
     if (md) {
       const outPath = path.resolve(opts.commentOut);
       fs.mkdirSync(path.dirname(outPath), { recursive: true });
@@ -380,9 +700,9 @@ async function processDirectMode(opts: Parameters<typeof processCommand>[0]) {
     }
   }
 
-  if (result.findingCount > 0) {
+  if (findingCount > 0) {
     console.log();
-    console.log(`${RED}${result.findingCount} new finding(s) — exiting 1${RESET}`);
+    console.log(`${RED}${findingCount} new finding(s) — exiting 1${RESET}`);
     process.exit(1);
   }
   console.log();

@@ -920,6 +920,7 @@ export class PiAgentPlugin implements AgentPlugin {
       projectRoot,
       projectInfo,
       force,
+      importersByFile: params.importersByFile,
     });
     const startTime = Date.now();
 

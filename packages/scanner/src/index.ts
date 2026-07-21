@@ -23,8 +23,20 @@ import type { MatcherPlugin, ScannerDriver, ScanProgress } from "./types.js";
 
 export type { DetectedTech } from "./detect-tech.js";
 export { detectTech, readTechJson, writeTechJson } from "./detect-tech.js";
+export { buildReverseImportGraph, defaultGraphProvider } from "./graph/collect-graph.js";
+export {
+  type ExternalFinding,
+  type ExternalResult,
+  parseSemgrepOutput,
+  parseTrufflehogOutput,
+  readExternalFindings,
+  runExternalScanners,
+  semgrepLangPacks,
+  trufflehogAvailable,
+} from "./external/run-external.js";
 export { MatcherRegistry } from "./matcher-registry.js";
 export { createDefaultRegistry } from "./matchers/index.js";
+export { pathRiskCategories } from "./matchers/risk-rules.js";
 export { regexMatcher } from "./matchers/utils.js";
 export type { MatcherPlugin, NoiseTier, ScannerDriver, ScanProgress } from "./types.js";
 
@@ -412,6 +424,8 @@ export async function scan(params: {
   projectId: string;
   root: string;
   matcherSlugs?: string[];
+  /** Matcher slugs to drop (e.g. secret matchers when trufflehog owns secrets). */
+  skipMatcherSlugs?: string[];
   /**
    * Extra ignore globs (added to the built-in defaults). When omitted,
    * `data/<projectId>/config.json:ignorePaths` is consulted.
@@ -434,9 +448,13 @@ export async function scan(params: {
   languageStats: LanguageStats[];
 }> {
   const registry = buildMergedRegistry();
+  // skipMatcherSlugs (e.g. secret matchers when trufflehog owns them) applies
+  // only to the default set — an explicit --matchers request is a stronger
+  // signal and is honored as-is.
+  const skipSet = new Set(params.skipMatcherSlugs ?? []);
   const allSelected = params.matcherSlugs
     ? registry.getBySlugs(params.matcherSlugs)
-    : registry.getAll();
+    : registry.getAll().filter((m) => !skipSet.has(m.slug));
 
   if (allSelected.length === 0) {
     throw new Error("No matchers selected");
@@ -607,6 +625,8 @@ export async function scanFiles(params: {
   /** Relative POSIX paths under `root`. Caller is responsible for ignore filtering. */
   filePaths: string[];
   matcherSlugs?: string[];
+  /** Matcher slugs to drop (e.g. secret matchers when trufflehog owns secrets). */
+  skipMatcherSlugs?: string[];
   /** Free-form origin label written to run-meta (e.g. "git-diff:origin/main"). */
   source?: string;
   onProgress?: (progress: ScanProgress) => void;
@@ -619,9 +639,13 @@ export async function scanFiles(params: {
   skippedMatchers: string[];
 }> {
   const registry = buildMergedRegistry();
+  // skipMatcherSlugs (e.g. secret matchers when trufflehog owns them) applies
+  // only to the default set — an explicit --matchers request is a stronger
+  // signal and is honored as-is.
+  const skipSet = new Set(params.skipMatcherSlugs ?? []);
   const allSelected = params.matcherSlugs
     ? registry.getBySlugs(params.matcherSlugs)
-    : registry.getAll();
+    : registry.getAll().filter((m) => !skipSet.has(m.slug));
 
   if (allSelected.length === 0) {
     throw new Error("No matchers selected");

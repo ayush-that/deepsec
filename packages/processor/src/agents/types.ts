@@ -33,6 +33,8 @@ export interface InvestigateParams {
 export interface InvestigateResult {
   filePath: string;
   findings: Finding[];
+  /** External-scanner candidates the agent explicitly cleared (the dismissal ledger). */
+  dismissed?: { vulnSlug: string; line: number; reason: string }[];
 }
 
 export interface BatchMeta {
@@ -73,6 +75,13 @@ export interface RevalidateParams {
   signal?: AbortSignal;
   /** See InvestigateParams.projectId — used for debug-log placement. */
   projectId?: string;
+  /**
+   * Per-file caller context (reverse-import graph): filePath → files that
+   * import it. Injected into the prompt so the agent judges reachability /
+   * exploitability from real call sites instead of grepping for them. Optional
+   * and best-effort — absent or empty means "no graph"; never gate a verdict on it.
+   */
+  importersByFile?: Record<string, string[]>;
 }
 
 export interface RevalidateVerdict {

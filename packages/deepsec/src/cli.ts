@@ -113,11 +113,24 @@ program
     "--matchers <slugs>",
     "Comma-separated matcher slugs to run (default: all registered matchers)",
   )
+  .option(
+    "--no-external",
+    "Skip external scanners (trufflehog/semgrep). By default they run when installed and their findings are stored aside for the process cross-check.",
+  )
   .addHelpText(
     "after",
     `
 The root is resolved from deepsec.config.ts (or data/<id>/project.json
 once a project has been scanned). Pass --root only when overriding.
+
+External scanners: when trufflehog and/or semgrep are on PATH, scan runs them
+and stores their findings aside (data/<id>/external/) — NOT as candidates, so
+the AI review stays unbiased; \`process\` cross-checks them afterward. trufflehog
+also replaces deepsec's own secret matchers, and scans for all detector types
+(verified + unverified, no entropy filter). semgrep defaults to p/security-audit
+plus language packs auto-selected from the detected tech (e.g. p/python,
+p/javascript). Override with data/<id>/config.json:semgrepConfig (comma-separated
+for multiple packs); an override is used verbatim (no auto language packs).
 
 Examples:
   $ pnpm deepsec scan --project-id my-app
@@ -193,6 +206,26 @@ program
     "--comment-out <path>",
     "Write a PR-comment-shaped markdown summary to <path> (only when findings exist)",
   )
+  .option(
+    "--duration <window>",
+    'Window mode: full scan + process over the whole repo, with changes on the default branch since <window> (any git --since string, e.g. "1 month") investigated deeper. Mutually exclusive with --diff*/--files*.',
+  )
+  .option(
+    "--diff-scan",
+    "With --duration: investigate ONLY the files changed in the window (scoped scan + process), not the whole repo. CI-style: exits 1 if any finding is produced.",
+  )
+  .option(
+    "--dry-run",
+    "Resolve the window and scan (both regex-only), print which files would get the deep vs standard pass, then stop before any AI investigation. Zero spend.",
+  )
+  .option(
+    "--with-graph",
+    "With --duration: expand the deep set by blast radius (files that import the changed ones, via a reverse-import graph). Opt-in; adds a whole-repo read pass.",
+  )
+  .option(
+    "--no-external",
+    "Skip external scanners (trufflehog/semgrep) + the post-review cross-check. By default, with --duration/--diff-scan they run when installed and are cross-checked against the review.",
+  )
   .action(processCommand);
 
 program
@@ -203,6 +236,14 @@ program
     "Project identifier (default: the only project in deepsec.config.ts; required if there are multiple)",
   )
   .option("--run-id <id>", "Filter to a specific run's results")
+  .option(
+    "--duration <window>",
+    'Add an "Introduced in the last <window>" section: findings whose line falls inside changes on the default branch since <window> (any git --since string).',
+  )
+  .option(
+    "--require-human-ack",
+    "Treat AI-dismissed deterministic (trufflehog/semgrep) findings as still unreconciled until a human acknowledges them.",
+  )
   .action(reportCommand);
 
 program
@@ -254,6 +295,10 @@ program
   .option("--manifest <path>", "JSON file with array of file paths to revalidate")
   .option("--only-slugs <csv>", "Only revalidate findings with one of these vulnSlugs")
   .option("--skip-slugs <csv>", "Skip findings with any of these vulnSlugs")
+  .option(
+    "--with-graph",
+    "Inject reverse-import caller context into each finding's prompt (reachability aid). Opt-in; adds a whole-repo read pass.",
+  )
   .action(revalidateCommand);
 
 program

@@ -2,10 +2,12 @@ import type {
   AgentPluginRef,
   DeepsecPlugin,
   ExecutorProvider,
+  GraphProvider,
   MatcherPlugin,
   NotifierPlugin,
   OwnershipProvider,
   PeopleProvider,
+  PullRequestProvider,
 } from "./plugin.js";
 
 /** A project the user wants to scan. */
@@ -53,6 +55,8 @@ export class PluginRegistry {
   ownership?: OwnershipProvider;
   people?: PeopleProvider;
   executor?: ExecutorProvider;
+  graphProvider?: GraphProvider;
+  pullRequests?: PullRequestProvider;
   commands: Array<(program: unknown) => void> = [];
 
   add(plugin: DeepsecPlugin): void {
@@ -62,6 +66,8 @@ export class PluginRegistry {
     if (plugin.ownership) this.ownership = plugin.ownership;
     if (plugin.people) this.people = plugin.people;
     if (plugin.executor) this.executor = plugin.executor;
+    if (plugin.graphProvider) this.graphProvider = plugin.graphProvider;
+    if (plugin.pullRequests) this.pullRequests = plugin.pullRequests;
     if (plugin.commands) this.commands.push(plugin.commands);
   }
 }

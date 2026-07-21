@@ -75,6 +75,7 @@ export async function revalidateCommand(opts: {
   manifest?: string;
   onlySlugs?: string;
   skipSlugs?: string;
+  withGraph?: boolean;
 }) {
   const projectId = resolveProjectId(opts.projectId);
   const _project = readProjectConfig(projectId);
@@ -111,6 +112,7 @@ export async function revalidateCommand(opts: {
     manifestPath: opts.manifest,
     onlySlugs,
     skipSlugs,
+    withGraph: opts.withGraph,
     onProgress: logProgress,
   });
 

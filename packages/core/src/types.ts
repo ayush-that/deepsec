@@ -274,12 +274,30 @@ export interface OwnershipData {
 
 export type FileStatus = "pending" | "processing" | "analyzed" | "error";
 
+/**
+ * A disposition for a deterministic (external-scanner) candidate that did NOT
+ * become a finding — the "dismissal ledger". Confirmed candidates need no entry
+ * (a Finding references them); this records what was cleared and why, so the
+ * report can gate on nothing being silently dropped.
+ */
+export interface ExternalDisposition {
+  vulnSlug: string;
+  line: number;
+  disposition: "dismissed" | "acknowledged";
+  reason: string;
+  by: "ai" | "human";
+  runId?: string;
+  at: string;
+}
+
 export interface FileRecord {
   filePath: string;
   projectId: string;
 
   // Scanner results — merged across scans
   candidates: CandidateMatch[];
+  /** Dispositions for external-scanner candidates cleared without a finding. */
+  dismissedExternal?: ExternalDisposition[];
   lastScannedAt: string;
   lastScannedRunId: string;
   fileHash: string;

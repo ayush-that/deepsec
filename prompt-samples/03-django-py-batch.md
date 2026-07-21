@@ -129,7 +129,7 @@ For each file:
 
 ## Output Format
 
-After your investigation, output a JSON block with your findings for EACH file. Use this exact format:
+After your investigation, output a JSON block for EACH file. Use this exact format:
 
 ```json
 [

@@ -111,10 +111,21 @@ export const analysisEntrySchema = z.object({
   reinvestigateMarker: z.number().optional(),
 });
 
+export const externalDispositionSchema = z.object({
+  vulnSlug: z.string(),
+  line: z.number(),
+  disposition: z.enum(["dismissed", "acknowledged"]),
+  reason: z.string(),
+  by: z.enum(["ai", "human"]),
+  runId: z.string().optional(),
+  at: z.string(),
+});
+
 export const fileRecordSchema = z.object({
   filePath: z.string(),
   projectId: z.string(),
   candidates: z.array(candidateMatchSchema),
+  dismissedExternal: z.array(externalDispositionSchema).optional(),
   lastScannedAt: z.string(),
   lastScannedRunId: z.string(),
   fileHash: z.string(),

@@ -19,7 +19,7 @@ interface Committer {
  * Derive the "org/repo" identifier from the git remote origin URL.
  * Handles both HTTPS and SSH remote formats.
  */
-function getRepoFromGitRemote(rootPath: string): string | null {
+export function getRepoFromGitRemote(rootPath: string): string | null {
   try {
     const url = execSync("git remote get-url origin", {
       cwd: rootPath,

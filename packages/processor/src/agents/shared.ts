@@ -324,7 +324,8 @@ export function buildInvestigatePrompt(params: {
       const matchDetails = r.candidates
         .map((m) => {
           const lines = m.lineNumbers.join(", ");
-          return `    - [${m.vulnSlug}] L${lines}: ${m.matchedPattern}`;
+          const ext = /^(trufflehog|semgrep)-/.test(m.vulnSlug) ? " ⟨external scanner⟩" : "";
+          return `    - [${m.vulnSlug}] L${lines}: ${m.matchedPattern}${ext}`;
         })
         .join("\n");
       return `- **${r.filePath}**\n${matchDetails}`;
@@ -344,6 +345,22 @@ export function buildInvestigatePrompt(params: {
   // pass the loaded INFO.md so it still reaches the model.
   const projectInfoBlock = projectInfo ? `## Project Context\n\n${projectInfo}\n\n` : "";
 
+  // The external-scanner reconcile directive only appears when the batch
+  // actually contains ⟨external scanner⟩ candidates (the cross-check pass) —
+  // the unbiased main review never carries them, so it isn't paid for there.
+  const hasExternal = batch.some((r) =>
+    r.candidates.some((c) => /^(trufflehog|semgrep)-/.test(c.vulnSlug)),
+  );
+  const externalStep = hasExternal
+    ? `\n6. **Reconcile the external-scanner hits** — candidates marked ⟨external scanner⟩ come from trufflehog/semgrep and must NOT be silently ignored. For each one, EITHER confirm it as a finding, OR add it to that file's \`dismissed\` array with a concrete reason (e.g. test fixture, unreachable, already mitigated). Use them as pointers and investigate the surrounding code for related issues.`
+    : "";
+  const dismissedField = hasExternal
+    ? `,\n    "dismissed": [\n      { "vulnSlug": "semgrep-...", "line": 12, "reason": "why this external-scanner hit is not a real issue" }\n    ]`
+    : "";
+  const dismissedNote = hasExternal
+    ? "\n\n`dismissed` is only for ⟨external scanner⟩ candidates you're clearing (omit it or use [] when none). Every external-scanner candidate must appear either in `findings` or in `dismissed`."
+    : "";
+
   return `${promptTemplate}
 
 ${projectInfoBlock}## Target Files
@@ -357,11 +374,11 @@ For each file:
 2. **Trace data flows** — where does input come from? Is it user-controlled?
 3. **Follow imports** — read related files (middleware, utils, shared libs) to understand the full picture
 4. **Check for mitigations** — is there sanitization, validation, auth middleware, or framework protection?
-5. **Think broadly** — look for issues beyond what the scanner flagged. The scanner only finds surface patterns; you should reason about logic bugs, race conditions, missing checks, etc.
+5. **Think broadly** — look for issues beyond what the scanner flagged. The scanner only finds surface patterns; you should reason about logic bugs, race conditions, missing checks, etc.${externalStep}
 
 ## Output Format
 
-After your investigation, output a JSON block with your findings for EACH file. Use this exact format:
+After your investigation, output a JSON block for EACH file. Use this exact format:
 
 \`\`\`json
 [
@@ -377,10 +394,10 @@ After your investigation, output a JSON block with your findings for EACH file. 
         "recommendation": "How to fix this vulnerability",
         "confidence": "high|medium|low"
       }
-    ]
+    ]${dismissedField}
   }
 ]
-\`\`\`
+\`\`\`${dismissedNote}
 
 **Severity levels:**
 - **CRITICAL / HIGH / MEDIUM** — security vulnerabilities (exploitable by an attacker)
@@ -593,15 +610,27 @@ export function parseInvestigateResults(
       `Agent produced JSON but not an array of file findings. Got: ${typeof parsed}`,
   });
 
-  const typedParsed = parsed as Array<{ filePath: string; findings: Finding[] }>;
+  const typedParsed = parsed as Array<{
+    filePath: string;
+    findings: Finding[];
+    dismissed?: { vulnSlug?: string; line?: number; reason?: string }[];
+  }>;
   const results: InvestigateResult[] = [];
   const batchPaths = new Set(batch.map((r) => r.filePath));
 
   for (const entry of typedParsed) {
     if (batchPaths.has(entry.filePath)) {
+      const dismissed = (entry.dismissed ?? [])
+        .filter((d) => d.vulnSlug)
+        .map((d) => ({
+          vulnSlug: String(d.vulnSlug),
+          line: Number(d.line ?? 0),
+          reason: String(d.reason ?? "").slice(0, 500),
+        }));
       results.push({
         filePath: entry.filePath,
         findings: entry.findings || [],
+        ...(dismissed.length > 0 ? { dismissed } : {}),
       });
       batchPaths.delete(entry.filePath);
     }
@@ -621,8 +650,11 @@ export function buildRevalidatePrompt(params: {
   projectRoot: string;
   projectInfo: string;
   force: boolean;
+  /** filePath → files that import it (reverse-import graph), for reachability context. */
+  importersByFile?: Record<string, string[]>;
 }): { prompt: string; totalFindings: number } {
-  const { batch, projectRoot, projectInfo, force } = params;
+  const { batch, projectRoot, projectInfo, force, importersByFile } = params;
+  const MAX_CALLERS_SHOWN = 20;
 
   const fileSections: string[] = [];
 
@@ -663,7 +695,22 @@ export function buildRevalidatePrompt(params: {
       }
     }
 
-    fileSections.push(`## File: ${file.filePath}\n\n${findingsList}\n${gitContext}`);
+    // Caller context for reachability. Only inject the positive signal; an empty
+    // list is omitted since the heuristic graph's "no importers" isn't reliable.
+    let callersContext = "";
+    const importers = importersByFile?.[file.filePath];
+    if (importers && importers.length > 0) {
+      const shown = importers.slice(0, MAX_CALLERS_SHOWN);
+      const more =
+        importers.length > MAX_CALLERS_SHOWN
+          ? `\n- …and ${importers.length - MAX_CALLERS_SHOWN} more`
+          : "";
+      callersContext = `\n**Callers (files that import this one — check whether any reaches the flagged code with untrusted input):**\n${shown
+        .map((i) => `- \`${i}\``)
+        .join("\n")}${more}\n`;
+    }
+
+    fileSections.push(`## File: ${file.filePath}\n\n${findingsList}\n${gitContext}${callersContext}`);
   }
 
   const totalFindings = batch.reduce(

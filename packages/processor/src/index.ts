@@ -18,7 +18,7 @@ import {
   writeFileRecord,
   writeRunMeta,
 } from "@deepsec/core";
-import { noiseScore, readTechJson } from "@deepsec/scanner";
+import { defaultGraphProvider, noiseScore, readTechJson } from "@deepsec/scanner";
 import { ClaudeAgentSdkPlugin } from "./agents/claude-agent-sdk.js";
 import { CodexAgentSdkPlugin } from "./agents/codex-sdk.js";
 import { PiAgentPlugin } from "./agents/pi-sdk.js";
@@ -58,6 +58,22 @@ export {
   TECH_HIGHLIGHTS,
 } from "./prompt/index.js";
 export { triage } from "./triage.js";
+// Change-window mode (process --duration / --diff-scan, report --duration).
+export {
+  addedLinesByFile,
+  type BlastRadiusHit,
+  expandByBlastRadius,
+  introducedFindings,
+  resolveWindowFocus,
+  type WindowFocus,
+} from "./window/focus.js";
+export { resolveWindow, type WindowResolution } from "./window/resolve-window.js";
+export {
+  type ExternalHit,
+  type ExternalItem,
+  type ExternalStatus,
+  reconcileExternal,
+} from "./reconcile.js";
 
 export function createDefaultAgentRegistry(): AgentRegistry {
   const registry = new AgentRegistry();
@@ -664,6 +680,28 @@ export async function process(params: {
           record.findings = [...(record.findings ?? []), ...newFindings];
           const findingsForHistoryCount = newFindings.length;
 
+          // Record the agent's dismissals of external-scanner candidates (the
+          // dismissal ledger), deduped by slug+line — the report gates on every
+          // external candidate being confirmed (a finding) or dismissed here.
+          if (res.dismissed && res.dismissed.length > 0) {
+            const ledger = record.dismissedExternal ?? [];
+            for (const d of res.dismissed) {
+              const already = ledger.some((e) => e.vulnSlug === d.vulnSlug && e.line === d.line);
+              if (!already) {
+                ledger.push({
+                  vulnSlug: d.vulnSlug,
+                  line: d.line,
+                  disposition: "dismissed",
+                  reason: d.reason,
+                  by: "ai",
+                  runId,
+                  at: new Date().toISOString(),
+                });
+              }
+            }
+            record.dismissedExternal = ledger;
+          }
+
           record.analysisHistory.push({
             runId,
             investigatedAt: new Date().toISOString(),
@@ -838,6 +876,8 @@ export async function revalidate(params: {
   onlySlugs?: string[];
   /** Skip findings with any of these vulnSlugs */
   skipSlugs?: string[];
+  /** Inject reverse-import caller context into each finding's prompt (opt-in; off by default). */
+  withGraph?: boolean;
   onProgress?: (progress: ProcessProgress) => void;
 }): Promise<{
   runId: string;
@@ -1006,6 +1046,26 @@ export async function revalidate(params: {
 
     const batches = batchCandidates(toRevalidate, batchSize);
 
+    // Opt-in (--with-graph): caller context per file for reachability. Off by
+    // default (an A/B showed no verdict change) and best-effort — never fatal.
+    const importersByFile: Record<string, string[]> = {};
+    if (params.withGraph) {
+      try {
+        const graphProvider = getRegistry().graphProvider ?? defaultGraphProvider;
+        const rev = await graphProvider.buildReverseGraph({
+          root: effectiveRootPath,
+          files: toRevalidate.map((r) => r.filePath),
+        });
+        if (rev) {
+          for (const [filePath, info] of Object.entries(rev)) {
+            if (info.importers.length > 0) importersByFile[filePath] = info.importers;
+          }
+        }
+      } catch {
+        // Graph is best-effort context; proceed without it.
+      }
+    }
+
     // Same quota-cancellation pattern as process(); see that block for why.
     const quotaAbort = new AbortController();
     let quotaExhausted: { source: QuotaSource; rawMessage: string } | undefined;
@@ -1032,6 +1092,7 @@ export async function revalidate(params: {
           force,
           signal: quotaAbort.signal,
           projectId,
+          importersByFile,
         });
 
         let result = await gen.next();

@@ -56,6 +56,43 @@ function detectGithubUrl(rootPath: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Resolve the repo's default branch as a git ref (e.g. "origin/main").
+ * Window mode resolves "what shipped last month" against the merged-to-main
+ * view, not in-flight feature branches. Falls back to "origin/main" when the
+ * symbolic ref isn't set (fresh clones sometimes lack origin/HEAD).
+ */
+export function resolveDefaultBranch(rootPath: string): string {
+  // Static commands only (no interpolation) — matches detectGithubUrl above and
+  // keeps this off the argv-vs-shell footgun.
+  const git = (cmd: string): string | null => {
+    try {
+      const out = execSync(cmd, {
+        cwd: rootPath,
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 5000,
+      }).trim();
+      return out || null;
+    } catch {
+      return null;
+    }
+  };
+  const head = git("git rev-parse --abbrev-ref origin/HEAD");
+  if (head && head !== "origin/HEAD") return head;
+  // origin/HEAD unset (common on fresh clones): probe the usual names rather
+  // than blindly assuming main — a `master` repo would otherwise resolve to a
+  // ref that doesn't exist and look like an empty window. Prefer remote refs,
+  // then local, before falling back to HEAD.
+  for (const ref of ["origin/main", "origin/master", "main", "master"]) {
+    if (git(`git rev-parse --verify --quiet ${ref}`)) return ref;
+  }
+  // Last resort for local runs without an origin or a main/master branch: the
+  // current tip. May be a feature branch — resolveWindow surfaces the branch it
+  // used so a wrong window is at least visible.
+  return "HEAD";
+}
+
 export function ensureProject(projectId: string, rootPath: string): ProjectConfig {
   const configPath = projectConfigPath(projectId);
   if (fs.existsSync(configPath)) {

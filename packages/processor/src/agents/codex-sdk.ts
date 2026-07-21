@@ -960,6 +960,7 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
       projectRoot,
       projectInfo,
       force,
+      importersByFile: params.importersByFile,
     });
     const totalFindings = built.totalFindings;
     const prompt = `${codexEnvironmentPreamble(projectRoot)}\n\n${built.prompt}`;

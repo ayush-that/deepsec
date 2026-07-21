@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildInvestigateJsonRepairPrompt,
   buildRevalidateJsonRepairPrompt,
+  buildRevalidatePrompt,
   classifyQuotaError,
   formatJsonRepairFailureDebugText,
   isTransientError,
@@ -15,6 +16,7 @@ import {
   QuotaExhaustedError,
   writeParseFailureDebug,
 } from "../agents/shared.js";
+import type { FileRecord } from "@deepsec/core";
 
 describe("isTransientError", () => {
   it("flags 5xx, 429, eager_input_streaming, ECONNRESET", () => {
@@ -405,5 +407,52 @@ describe("writeParseFailureDebug", () => {
         error: new Error("x"),
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("buildRevalidatePrompt caller context", () => {
+  const record = {
+    filePath: "src/auth/rbac.ts",
+    projectId: "t",
+    candidates: [],
+    lastScannedAt: "",
+    lastScannedRunId: "",
+    fileHash: "",
+    findings: [
+      {
+        severity: "HIGH",
+        vulnSlug: "authz",
+        title: "Missing authorization",
+        description: "d",
+        lineNumbers: [10],
+        recommendation: "r",
+        confidence: "high",
+      },
+    ],
+    analysisHistory: [],
+    status: "analyzed",
+  } as unknown as FileRecord;
+
+  it("injects the caller list when importers are known", () => {
+    const { prompt } = buildRevalidatePrompt({
+      batch: [record],
+      projectRoot: os.tmpdir(),
+      projectInfo: "",
+      force: false,
+      importersByFile: { "src/auth/rbac.ts": ["src/app/api/route.ts", "src/mw.ts"] },
+    });
+    expect(prompt).toContain("Callers (files that import");
+    expect(prompt).toContain("src/app/api/route.ts");
+  });
+
+  it("omits the callers block when the file has no known importers", () => {
+    const { prompt } = buildRevalidatePrompt({
+      batch: [record],
+      projectRoot: os.tmpdir(),
+      projectInfo: "",
+      force: false,
+      importersByFile: {},
+    });
+    expect(prompt).not.toContain("Callers (files that import");
   });
 });

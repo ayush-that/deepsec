@@ -493,6 +493,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
       projectRoot,
       projectInfo,
       force,
+      importersByFile: params.importersByFile,
     });
 
     yield {

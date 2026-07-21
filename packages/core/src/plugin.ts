@@ -171,6 +171,40 @@ export interface ExecutorProvider {
 
 export type AgentPluginRef = unknown;
 
+// --- Change-window mode (process --duration) providers ---
+
+export interface GraphProvider {
+  name: string;
+  /** null = not available → fall back to the lightweight built-in collector. */
+  buildReverseGraph(args: { root: string; files: string[] }): Promise<Record<
+    string,
+    { importedByCount: number; importers: string[]; isEntryPoint: boolean }
+  > | null>;
+}
+
+/** Pre-extracted PR/commit context for a set of commits. */
+export interface PullRequestContext {
+  prNumber: number;
+  /** Files touched by this PR, as repo-relative POSIX paths. */
+  files: string[];
+  /** Full title + body — used ONLY for HIGH-file investigation context, never for tiering. */
+  description?: string;
+  keywordHits: string[];
+  labels: string[];
+}
+
+export interface PullRequestProvider {
+  name: string;
+  /** null = not available → soft-fail, run leans on structural signals (prSignal:"unavailable"). */
+  fetch(args: {
+    /** Repo checkout root — providers that shell out (e.g. `gh`) must run here. */
+    root: string;
+    /** "owner/repo" derived from the git remote, or "" when it couldn't be parsed. */
+    repo: string;
+    commits: { sha: string; subject: string }[];
+  }): Promise<PullRequestContext[] | null>;
+}
+
 // --- Umbrella plugin ---
 
 export interface DeepsecPlugin {
@@ -184,6 +218,10 @@ export interface DeepsecPlugin {
   people?: PeopleProvider;
   /** Last plugin to declare this wins. */
   executor?: ExecutorProvider;
+  /** Last plugin to declare this wins. Overrides the default import-graph collector. */
+  graphProvider?: GraphProvider;
+  /** Last plugin to declare this wins. Overrides the default gh→commit-msg PR provider. */
+  pullRequests?: PullRequestProvider;
   /**
    * Hook for plugins to register their own CLI subcommands. Receives a
    * Commander program (typed loosely to avoid a commander dep in core).

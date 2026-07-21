@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { findProject, getConfigPath, loadAllFileRecords, projectConfigPath } from "@deepsec/core";
 import { scan } from "@deepsec/scanner";
+import { externalScanPlan, runExternals } from "../external-scan.js";
 import { BOLD, CYAN, DIM, GREEN, RESET, YELLOW } from "../formatters.js";
 import { requireExistingDir } from "../require-dir.js";
 import { resolveProjectId } from "../resolve-project-id.js";
@@ -51,14 +52,29 @@ function pad(s: string, width: number): string {
   return visibleLen >= width ? s : s + " ".repeat(width - visibleLen);
 }
 
-export async function scanCommand(opts: { projectId?: string; root?: string; matchers?: string }) {
+export async function scanCommand(opts: {
+  projectId?: string;
+  root?: string;
+  matchers?: string;
+  /** Commander `--no-external` sets this false; default true. */
+  external?: boolean;
+}) {
   const projectId = resolveProjectId(opts.projectId);
   const matcherSlugs = opts.matchers ? opts.matchers.split(",").map((s) => s.trim()) : undefined;
   const resolvedRoot = resolveScanRoot({ projectId, root: opts.root });
 
+  // External scanners (trufflehog/semgrep) run when present unless --no-external.
+  // With trufflehog installed, deepsec's own secret matchers are dropped.
+  const extPlan = externalScanPlan(projectId, opts);
+
   console.log(`${BOLD}Scanning${RESET} ${resolvedRoot} for project ${BOLD}${projectId}${RESET}`);
   if (matcherSlugs) {
     console.log(`${DIM}Filtered matchers:${RESET} ${matcherSlugs.join(", ")}`);
+  }
+  if (extPlan.useTrufflehog) {
+    console.log(
+      `${DIM}trufflehog present — skipping deepsec secret matchers (${extPlan.skipMatcherSlugs!.length})${RESET}`,
+    );
   }
 
   // Per-matcher hit counts collected from progress events. Used in the
@@ -119,6 +135,7 @@ export async function scanCommand(opts: { projectId?: string; root?: string; mat
     projectId,
     root: resolvedRoot,
     matcherSlugs,
+    skipMatcherSlugs: extPlan.skipMatcherSlugs,
     onProgress(progress) {
       // Globbing phase: collapse to a single re-rendered line so we don't
       // print 50+ "Globbing pattern X/Y" rows on big projects.
@@ -287,6 +304,12 @@ export async function scanCommand(opts: { projectId?: string; root?: string; mat
       `  ${DIM}See docs/writing-matchers.md for how to add a custom matcher plugin.${RESET}`,
     );
   }
+
+  // External scanners (deterministic, no AI) — findings are stored aside and
+  // cross-checked against the AI review later (during `process`), not merged as
+  // candidates, so the review stays unbiased.
+  console.log();
+  runExternals(projectId, resolvedRoot, extPlan);
 
   // Final tally + next steps.
   console.log();
