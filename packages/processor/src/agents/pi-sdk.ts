@@ -29,11 +29,13 @@ import {
   isUsingAiGateway,
   jsonRepairFailureError,
   MAX_ATTEMPTS,
+  type ParsedInvestigateResults,
   parseInvestigateResults,
   parseRefusalReport,
   parseRevalidateVerdicts,
   QuotaExhaustedError,
   REFUSAL_FOLLOWUP_PROMPT,
+  runInvestigateFieldRepairLoop,
   runRevalidateIdRepairLoop,
   writeParseFailureDebug,
 } from "./shared.js";
@@ -900,9 +902,9 @@ export class PiAgentPlugin implements AgentPlugin {
     }
 
     const durationMs = Date.now() - startTime;
-    let results: InvestigateResult[];
+    let parsed: ParsedInvestigateResults;
     try {
-      results = parseInvestigateResults(resultText, batch);
+      parsed = parseInvestigateResults(resultText, batch);
     } catch (err) {
       yield {
         type: "thinking",
@@ -926,7 +928,7 @@ export class PiAgentPlugin implements AgentPlugin {
         throw err;
       }
       try {
-        results = parseInvestigateResults(repairText, batch);
+        parsed = parseInvestigateResults(repairText, batch);
         resultText = repairText;
         yield { type: "thinking", message: "Pi JSON repair succeeded" };
       } catch (repairErr) {
@@ -942,6 +944,20 @@ export class PiAgentPlugin implements AgentPlugin {
         session?.dispose();
         throw combinedError;
       }
+    }
+
+    let results: InvestigateResult[] = parsed.results;
+    if (parsed.invalid.length > 0) {
+      const fieldRepair = yield* runInvestigateFieldRepairLoop({
+        results,
+        invalid: parsed.invalid,
+        batch,
+        followUp: (p) => runToollessFollowUp(session, p, signal),
+        agentLabel: "Pi",
+        agentType: this.type,
+        projectId,
+      });
+      results = fieldRepair.results;
     }
 
     const refusal = await runRefusalFollowUp(session, signal);

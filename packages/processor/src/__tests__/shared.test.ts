@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  buildInvestigateFieldRepairPrompt,
   buildInvestigateJsonRepairPrompt,
   buildRevalidateJsonRepairPrompt,
   classifyQuotaError,
@@ -13,6 +14,7 @@ import {
   parseRefusalReport,
   parseRevalidateVerdicts,
   QuotaExhaustedError,
+  runInvestigateFieldRepairLoop,
   writeParseFailureDebug,
 } from "../agents/shared.js";
 
@@ -300,26 +302,44 @@ describe("JSON repair prompts", () => {
   });
 });
 
+/** A finding that passes `findingSchema` verbatim. */
+function validFinding(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    severity: "HIGH",
+    vulnSlug: "sql-injection",
+    title: "SQL injection in user lookup",
+    description: "Interpolates req.query.id into a raw query",
+    lineNumbers: [10, 15],
+    recommendation: "Use parameterized queries",
+    confidence: "high",
+    ...overrides,
+  };
+}
+
 describe("parseInvestigateResults", () => {
   const batch = [{ filePath: "a.ts" } as any, { filePath: "b.ts" } as any];
 
   it("matches results to batch files; fills missing with empty findings", () => {
-    const text = '```json\n[{"filePath":"a.ts","findings":[{"severity":"HIGH"}]}]\n```';
+    const text = `\`\`\`json\n[{"filePath":"a.ts","findings":[${JSON.stringify(validFinding())}]}]\n\`\`\``;
     const out = parseInvestigateResults(text, batch);
-    expect(out.find((r) => r.filePath === "a.ts")?.findings.length).toBe(1);
-    expect(out.find((r) => r.filePath === "b.ts")?.findings).toEqual([]);
+    expect(out.results.find((r) => r.filePath === "a.ts")?.findings.length).toBe(1);
+    expect(out.results.find((r) => r.filePath === "b.ts")?.findings).toEqual([]);
+    expect(out.invalid).toEqual([]);
   });
 
   it("repairs common malformed model JSON before parsing findings", () => {
-    const text =
-      'Confirmed:\n```json\n[{"filePath":"a.ts","findings":[{"severity":"MEDIUM","description":"Uses "signature !== expectedHash" comparison",}]}';
+    const finding = JSON.stringify(validFinding({ description: "placeholder" }), null, 0).replace(
+      '"description":"placeholder"',
+      '"description":"Uses "signature !== expectedHash" comparison"',
+    );
+    const text = `Confirmed:\n\`\`\`json\n[{"filePath":"a.ts","findings":[${finding}]}`;
 
     const out = parseInvestigateResults(text, batch);
 
-    expect(out.find((r) => r.filePath === "a.ts")?.findings[0]?.description).toBe(
+    expect(out.results.find((r) => r.filePath === "a.ts")?.findings[0]?.description).toBe(
       'Uses "signature !== expectedHash" comparison',
     );
-    expect(out.find((r) => r.filePath === "b.ts")?.findings).toEqual([]);
+    expect(out.results.find((r) => r.filePath === "b.ts")?.findings).toEqual([]);
   });
 
   it("throws on parse failure (fail-loud, never silently empty)", () => {
@@ -337,6 +357,159 @@ describe("parseInvestigateResults", () => {
     expect(() => parseInvestigateResults('```json\n{"oops":"object"}\n```', batch)).toThrow(
       /not an array/,
     );
+  });
+
+  it("salvages valid findings and reports invalid ones instead of dropping the file", () => {
+    // One bad enum used to poison the whole file record downstream: the
+    // read-side schema rejected the record and every valid finding in it
+    // vanished silently. Now the bad finding is carried out via `invalid`
+    // for an in-session field repair.
+    const findings = [
+      validFinding(),
+      validFinding({ title: "Bad severity", severity: "INFORMATIONAL" }),
+      validFinding({ title: "Bad lineNumbers", lineNumbers: ["12"] }),
+    ];
+    const text = `\`\`\`json\n${JSON.stringify([{ filePath: "a.ts", findings }])}\n\`\`\``;
+
+    const out = parseInvestigateResults(text, batch);
+
+    const a = out.results.find((r) => r.filePath === "a.ts");
+    expect(a?.findings.map((f) => f.title)).toEqual(["SQL injection in user lookup"]);
+    expect(out.invalid).toHaveLength(2);
+    expect(out.invalid[0].filePath).toBe("a.ts");
+    expect(out.invalid[0].issues).toContain("severity");
+    expect(out.invalid[1].issues).toContain("lineNumbers");
+  });
+
+  it("treats non-object findings as invalid", () => {
+    const text = `\`\`\`json\n[{"filePath":"a.ts","findings":["oops"]}]\n\`\`\``;
+    const out = parseInvestigateResults(text, batch);
+    expect(out.results.find((r) => r.filePath === "a.ts")?.findings).toEqual([]);
+    expect(out.invalid).toHaveLength(1);
+  });
+});
+
+describe("buildInvestigateFieldRepairPrompt", () => {
+  it("echoes each invalid finding with its validation errors", () => {
+    const prompt = buildInvestigateFieldRepairPrompt([
+      {
+        filePath: "a.ts",
+        raw: { severity: "INFO", title: "t" },
+        issues: "severity: Invalid enum value",
+      },
+    ]);
+
+    expect(prompt).toContain('filePath: "a.ts"');
+    expect(prompt).toContain("severity: Invalid enum value");
+    expect(prompt).toContain('"severity": "INFO"');
+    expect(prompt).toContain("Do not redo the investigation");
+    expect(prompt).toContain("do not repeat findings that were already accepted");
+  });
+});
+
+describe("runInvestigateFieldRepairLoop", () => {
+  const batch = [{ filePath: "a.ts" } as any];
+
+  async function drive<T>(gen: AsyncGenerator<unknown, T>): Promise<{ ret: T; events: any[] }> {
+    const events: any[] = [];
+    let next = await gen.next();
+    while (!next.done) {
+      events.push(next.value);
+      next = await gen.next();
+    }
+    return { ret: next.value, events };
+  }
+
+  it("merges repaired findings back into the kept results", async () => {
+    const bad = validFinding({ title: "Fixed later", severity: "critical" });
+    const fixed = validFinding({ title: "Fixed later", severity: "CRITICAL" });
+    const prompts: string[] = [];
+
+    const { ret } = await drive(
+      runInvestigateFieldRepairLoop({
+        results: [{ filePath: "a.ts", findings: [validFinding() as any] }],
+        invalid: [{ filePath: "a.ts", raw: bad, issues: "severity: Invalid enum value" }],
+        batch,
+        followUp: async (p) => {
+          prompts.push(p);
+          return JSON.stringify([{ filePath: "a.ts", findings: [fixed] }]);
+        },
+        agentLabel: "Test",
+        agentType: "test",
+      }),
+    );
+
+    expect(prompts).toHaveLength(1);
+    expect(ret.repairAttempts).toBe(1);
+    const a = ret.results.find((r) => r.filePath === "a.ts");
+    expect(a?.findings.map((f) => f.title).sort()).toEqual([
+      "Fixed later",
+      "SQL injection in user lookup",
+    ]);
+  });
+
+  it("does not duplicate findings the model re-emits alongside the repair", async () => {
+    const { ret } = await drive(
+      runInvestigateFieldRepairLoop({
+        results: [{ filePath: "a.ts", findings: [validFinding() as any] }],
+        invalid: [{ filePath: "a.ts", raw: {}, issues: "severity: Required" }],
+        batch,
+        // Model ignores instructions and re-emits the already-accepted
+        // finding too — signature dedup keeps exactly one copy.
+        followUp: async () =>
+          JSON.stringify([
+            { filePath: "a.ts", findings: [validFinding(), validFinding({ title: "Repaired" })] },
+          ]),
+        agentLabel: "Test",
+        agentType: "test",
+      }),
+    );
+
+    const a = ret.results.find((r) => r.filePath === "a.ts");
+    expect(a?.findings).toHaveLength(2);
+  });
+
+  it("drops still-invalid findings after maxRepairs and keeps the valid ones", async () => {
+    const { ret, events } = await drive(
+      runInvestigateFieldRepairLoop({
+        results: [{ filePath: "a.ts", findings: [validFinding() as any] }],
+        invalid: [
+          { filePath: "a.ts", raw: { severity: "INFO" }, issues: "severity: Invalid enum value" },
+        ],
+        batch,
+        // Repair keeps returning the same invalid finding.
+        followUp: async () =>
+          JSON.stringify([
+            {
+              filePath: "a.ts",
+              findings: [validFinding({ severity: "INFO", title: "Still bad" })],
+            },
+          ]),
+        agentLabel: "Test",
+        agentType: "test",
+        maxRepairs: 2,
+      }),
+    );
+
+    expect(ret.repairAttempts).toBe(2);
+    const a = ret.results.find((r) => r.filePath === "a.ts");
+    expect(a?.findings.map((f) => f.title)).toEqual(["SQL injection in user lookup"]);
+    expect(events.some((e) => /dropping 1 finding/.test(e.message))).toBe(true);
+  });
+
+  it("gives up cleanly when the follow-up returns undefined", async () => {
+    const { ret } = await drive(
+      runInvestigateFieldRepairLoop({
+        results: [{ filePath: "a.ts", findings: [] }],
+        invalid: [{ filePath: "a.ts", raw: {}, issues: "severity: Required" }],
+        batch,
+        followUp: async () => undefined,
+        agentLabel: "Test",
+        agentType: "test",
+      }),
+    );
+
+    expect(ret.results.find((r) => r.filePath === "a.ts")?.findings).toEqual([]);
   });
 });
 

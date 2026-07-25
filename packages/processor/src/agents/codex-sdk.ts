@@ -23,11 +23,13 @@ import {
   isTransientError,
   jsonRepairFailureError,
   MAX_ATTEMPTS,
+  type ParsedInvestigateResults,
   parseInvestigateResults,
   parseRefusalReport,
   parseRevalidateVerdicts,
   QuotaExhaustedError,
   REFUSAL_FOLLOWUP_PROMPT,
+  runInvestigateFieldRepairLoop,
   runRevalidateIdRepairLoop,
   writeParseFailureDebug,
 } from "./shared.js";
@@ -873,9 +875,9 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
         );
       }
 
-      let parsed: InvestigateResult[];
+      let parsedOutcome: ParsedInvestigateResults;
       try {
-        parsed = parseInvestigateResults(resultText, batch);
+        parsedOutcome = parseInvestigateResults(resultText, batch);
       } catch (err) {
         yield {
           type: "thinking" as const,
@@ -900,7 +902,7 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
           throw err;
         }
         try {
-          parsed = parseInvestigateResults(repairText, batch);
+          parsedOutcome = parseInvestigateResults(repairText, batch);
           yield { type: "thinking" as const, message: "Codex JSON repair succeeded" };
         } catch (repairErr) {
           const combinedError = jsonRepairFailureError(err, repairErr);
@@ -915,6 +917,20 @@ export class CodexAgentSdkPlugin implements AgentPlugin {
           throw combinedError;
         }
       }
+      let parsed: InvestigateResult[] = parsedOutcome.results;
+      if (parsedOutcome.invalid.length > 0) {
+        const fieldRepair = yield* runInvestigateFieldRepairLoop({
+          results: parsed,
+          invalid: parsedOutcome.invalid,
+          batch,
+          followUp: (p) => runToollessFollowUp(codex, threadId, projectRoot, model, p),
+          agentLabel: "Codex",
+          agentType: this.type,
+          projectId,
+        });
+        parsed = fieldRepair.results;
+      }
+
       if (DEBUG) {
         const matched = parsed.filter((r) => r.findings.length > 0).length;
         const totalFindings = parsed.reduce((s, r) => s + r.findings.length, 0);
