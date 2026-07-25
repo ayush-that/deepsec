@@ -24,7 +24,7 @@ export function RunCommand({ command }: { command: string }) {
         className="ml-auto flex shrink-0 items-center gap-1.5 px-2 py-1 text-sm text-gray-900 transition-colors hover:text-gray-1000"
       >
         {copied ? (
-          <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path
               d="M13.5 4.5L6 12L2.5 8.5"
               stroke="currentColor"
@@ -34,7 +34,7 @@ export function RunCommand({ command }: { command: string }) {
             />
           </svg>
         ) : (
-          <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none">
             <rect
               x="5.5"
               y="5.5"
