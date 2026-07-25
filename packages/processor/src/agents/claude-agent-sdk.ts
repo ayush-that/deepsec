@@ -11,11 +11,13 @@ import {
   isTransientError,
   jsonRepairFailureError,
   MAX_ATTEMPTS,
+  type ParsedInvestigateResults,
   parseInvestigateResults,
   parseRefusalReport,
   parseRevalidateVerdicts,
   QuotaExhaustedError,
   REFUSAL_FOLLOWUP_PROMPT,
+  runInvestigateFieldRepairLoop,
   runRevalidateIdRepairLoop,
   writeParseFailureDebug,
 } from "./shared.js";
@@ -407,9 +409,9 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
       );
     }
 
-    let results: InvestigateResult[];
+    let parsed: ParsedInvestigateResults;
     try {
-      results = parseInvestigateResults(resultText, batch);
+      parsed = parseInvestigateResults(resultText, batch);
     } catch (err) {
       yield {
         type: "thinking" as const,
@@ -433,7 +435,7 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
         throw err;
       }
       try {
-        results = parseInvestigateResults(repairText, batch);
+        parsed = parseInvestigateResults(repairText, batch);
         resultText = repairText;
         yield { type: "thinking" as const, message: "Claude JSON repair succeeded" };
       } catch (repairErr) {
@@ -448,6 +450,20 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
         });
         throw combinedError;
       }
+    }
+
+    let results: InvestigateResult[] = parsed.results;
+    if (parsed.invalid.length > 0) {
+      const fieldRepair = yield* runInvestigateFieldRepairLoop({
+        results,
+        invalid: parsed.invalid,
+        batch,
+        followUp: (p) => runToollessFollowUp(sessionId, model, projectRoot, p),
+        agentLabel: "Claude",
+        agentType: this.type,
+        projectId,
+      });
+      results = fieldRepair.results;
     }
 
     const refusal = await runRefusalFollowUp(sessionId, model, projectRoot);

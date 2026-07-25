@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { type AnalysisEntry, type FileRecord, type Finding, fileRecordSchema } from "@deepsec/core";
+import {
+  type AnalysisEntry,
+  type FileRecord,
+  type Finding,
+  salvageFileRecord,
+} from "@deepsec/core";
 
 /**
  * Tarball extraction is `cwd=dataDir(projectId)`, so file records live
@@ -168,7 +173,10 @@ function mergeFinding(host: Finding, incoming: Finding): Finding {
  *
  * Sandbox output is the trust boundary, so every incoming record must:
  *   - parse as JSON
- *   - match `fileRecordSchema` exactly
+ *   - match `fileRecordSchema`, salvaged at finding granularity: an
+ *     individually malformed finding is dropped (with a warning) while
+ *     the record's valid findings survive; an invalid envelope rejects
+ *     the whole record
  *   - declare the same `projectId` as the destDir's basename
  *   - declare a `filePath` whose serialized form matches the tarball entry
  *     path (`files/<filePath>.json`)
@@ -212,18 +220,33 @@ export function mergeAfterExtract(
     let parsedRaw: unknown;
     try {
       parsedRaw = JSON.parse(raw);
-    } catch {
+    } catch (err) {
       // Malformed JSON — restore host snapshot if we have one, else drop.
+      console.warn(
+        `[deepsec] sandbox record ${rel} is not valid JSON (${err instanceof Error ? err.message : err}); ${host ? "restoring host version" : "dropping"}`,
+      );
       restoreOrDrop(full, host);
       continue;
     }
 
-    const parsed = fileRecordSchema.safeParse(parsedRaw);
-    if (!parsed.success) {
+    // Per-finding salvage: a record whose only defect is one malformed
+    // finding keeps its valid findings instead of being rejected whole
+    // (which silently erased every valid finding for that file). Only an
+    // invalid envelope rejects the record.
+    const salvaged = salvageFileRecord(parsedRaw);
+    if (!salvaged.ok) {
+      console.warn(
+        `[deepsec] sandbox record ${rel} failed validation (${salvaged.error}); ${host ? "restoring host version" : "dropping"}`,
+      );
       restoreOrDrop(full, host);
       continue;
     }
-    const incoming = parsed.data;
+    for (const dropped of salvaged.droppedFindings) {
+      console.warn(
+        `[deepsec] dropping malformed finding #${dropped.index} from sandbox record ${rel}: ${dropped.issues}`,
+      );
+    }
+    const incoming = salvaged.record;
 
     // Sandbox tarball came from `data/<projectId>/`, so every record in
     // it must claim that same projectId, and the on-disk path must match
@@ -234,7 +257,15 @@ export function mergeAfterExtract(
       continue;
     }
 
-    if (!host) continue;
+    if (!host) {
+      // Rewrite so the malformed findings the salvage dropped don't
+      // linger on disk to be re-salvaged (and re-warned about) on every
+      // subsequent load.
+      if (salvaged.droppedFindings.length > 0) {
+        fs.writeFileSync(full, JSON.stringify(incoming, null, 2) + "\n");
+      }
+      continue;
+    }
     const out = mergeFileRecord(host, incoming);
     fs.writeFileSync(full, JSON.stringify(out, null, 2) + "\n");
     merged++;

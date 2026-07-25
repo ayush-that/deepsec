@@ -319,4 +319,80 @@ describe("snapshotFileRecords + mergeAfterExtract", () => {
     const snap = snapshotFileRecords(dir, ["files/broken.ts.json", "files/ok.ts.json"]);
     expect(snap.size).toBe(1);
   });
+
+  it("salvages valid findings from a sandbox record with one malformed finding", () => {
+    // Regression: one bad enum in one finding used to fail the whole
+    // record's schema parse, silently restoring the host version — every
+    // valid finding from the sandbox run vanished with no error.
+    const filesDir = path.join(dir, "files", "src");
+    fs.mkdirSync(filesDir, { recursive: true });
+    const recPath = path.join(filesDir, "foo.ts.json");
+    const projectId = path.basename(dir);
+    fs.writeFileSync(
+      recPath,
+      JSON.stringify(record({ projectId, findings: [finding("xss", "Host finding")] })),
+    );
+    const tarballEntries = ["files/src/foo.ts.json"];
+    const snap = snapshotFileRecords(dir, tarballEntries);
+
+    // Simulate the extract landing a sandbox record with one valid and
+    // one field-invalid finding.
+    const incoming = record({
+      projectId,
+      findings: [
+        finding("sqli", "Valid sandbox finding"),
+        finding("csrf", "Invalid sandbox finding", { severity: "INFORMATIONAL" as never }),
+      ],
+    });
+    fs.writeFileSync(recPath, JSON.stringify(incoming));
+
+    const merged = mergeAfterExtract(dir, snap, projectId, tarballEntries);
+    expect(merged).toBe(1);
+
+    const after = JSON.parse(fs.readFileSync(recPath, "utf-8"));
+    expect(after.findings.map((f: Finding) => f.title).sort()).toEqual([
+      "Host finding",
+      "Valid sandbox finding",
+    ]);
+  });
+
+  it("rewrites a host-less sandbox record without its malformed findings", () => {
+    const filesDir = path.join(dir, "files", "src");
+    fs.mkdirSync(filesDir, { recursive: true });
+    const recPath = path.join(filesDir, "new.ts.json");
+    const projectId = path.basename(dir);
+    const incoming = record({
+      filePath: "src/new.ts",
+      projectId,
+      findings: [
+        finding("sqli", "Valid"),
+        finding("csrf", "Invalid", { lineNumbers: ["7"] as never }),
+      ],
+    });
+    fs.writeFileSync(recPath, JSON.stringify(incoming));
+
+    mergeAfterExtract(dir, new Map(), projectId, ["files/src/new.ts.json"]);
+
+    const after = JSON.parse(fs.readFileSync(recPath, "utf-8"));
+    expect(after.findings.map((f: Finding) => f.title)).toEqual(["Valid"]);
+  });
+
+  it("still restores the host version when the record envelope is invalid", () => {
+    const filesDir = path.join(dir, "files", "src");
+    fs.mkdirSync(filesDir, { recursive: true });
+    const recPath = path.join(filesDir, "foo.ts.json");
+    const projectId = path.basename(dir);
+    const host = record({ projectId, findings: [finding("xss", "Host finding")] });
+    fs.writeFileSync(recPath, JSON.stringify(host));
+    const tarballEntries = ["files/src/foo.ts.json"];
+    const snap = snapshotFileRecords(dir, tarballEntries);
+
+    fs.writeFileSync(recPath, JSON.stringify({ ...record({ projectId }), status: "not-a-status" }));
+
+    mergeAfterExtract(dir, snap, projectId, tarballEntries);
+
+    const after = JSON.parse(fs.readFileSync(recPath, "utf-8"));
+    expect(after.findings.map((f: Finding) => f.title)).toEqual(["Host finding"]);
+    expect(after.status).toBe(host.status);
+  });
 });

@@ -1,7 +1,14 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { dataDir, type FileRecord, type Finding, type RefusalReport } from "@deepsec/core";
+import {
+  dataDir,
+  type FileRecord,
+  type Finding,
+  findingSchema,
+  formatSchemaIssues,
+  type RefusalReport,
+} from "@deepsec/core";
 import { jsonrepair } from "jsonrepair";
 import {
   type ExpectedFinding,
@@ -734,10 +741,31 @@ function parseAgentJsonArray(params: {
   return parsed;
 }
 
+/**
+ * A finding the agent emitted inside valid JSON but with invalid fields
+ * (bad enum value, wrong type, missing required field). Carried out of
+ * `parseInvestigateResults` so the caller can request an in-session
+ * field-repair instead of the finding being written to disk unvalidated —
+ * where the strict read-side schema used to silently erase the whole
+ * file's findings.
+ */
+interface InvalidFindingEntry {
+  filePath: string;
+  /** The finding as the agent emitted it, verbatim. */
+  raw: unknown;
+  /** Compact zod issue summary, e.g. `severity: Invalid enum value ...`. */
+  issues: string;
+}
+
+export interface ParsedInvestigateResults {
+  results: InvestigateResult[];
+  invalid: InvalidFindingEntry[];
+}
+
 export function parseInvestigateResults(
   resultText: string,
   batch: FileRecord[],
-): InvestigateResult[] {
+): ParsedInvestigateResults {
   // Fail loud when neither strict JSON nor tolerant jsonrepair can produce
   // an array. A malformed response is otherwise indistinguishable from a
   // clean "found nothing" run, which would mask truncation, gateway splice,
@@ -749,16 +777,31 @@ export function parseInvestigateResults(
       `Agent produced JSON but not an array of file findings. Got: ${typeof parsed}`,
   });
 
-  const typedParsed = parsed as Array<{ filePath: string; findings: Finding[] }>;
+  const typedParsed = parsed as Array<{ filePath: string; findings: unknown[] }>;
   const results: InvestigateResult[] = [];
+  const invalid: InvalidFindingEntry[] = [];
   const batchPaths = new Set(batch.map((r) => r.filePath));
 
   for (const entry of typedParsed) {
     if (batchPaths.has(entry.filePath)) {
-      results.push({
-        filePath: entry.filePath,
-        findings: entry.findings || [],
-      });
+      // Field-validate each finding now, while the session that produced
+      // it is still alive and can repair it. Findings used to be written
+      // to disk as-emitted; the strict read-side schema then rejected the
+      // whole record over one bad field — silently.
+      const findings: Finding[] = [];
+      for (const raw of entry.findings || []) {
+        const parsedFinding = findingSchema.safeParse(raw);
+        if (parsedFinding.success) {
+          findings.push(parsedFinding.data);
+        } else {
+          invalid.push({
+            filePath: entry.filePath,
+            raw,
+            issues: formatSchemaIssues(parsedFinding.error),
+          });
+        }
+      }
+      results.push({ filePath: entry.filePath, findings });
       batchPaths.delete(entry.filePath);
     }
   }
@@ -767,7 +810,146 @@ export function parseInvestigateResults(
     results.push({ filePath, findings: [] });
   }
 
-  return results;
+  return { results, invalid };
+}
+
+/**
+ * Follow-up prompt for the field-repair turn: the response parsed as JSON
+ * and structurally valid findings were kept, but some findings had invalid
+ * or missing fields. Echo each invalid finding back with its validation
+ * errors so the model mostly just has to fix the offending field.
+ */
+export function buildInvestigateFieldRepairPrompt(invalid: InvalidFindingEntry[]): string {
+  const perFinding = invalid
+    .map(
+      (e, i) =>
+        `### Invalid finding ${i + 1} (filePath: ${JSON.stringify(e.filePath)})\n\n` +
+        `Validation errors: ${e.issues}\n\n` +
+        `As you emitted it:\n\`\`\`json\n${JSON.stringify(e.raw, null, 2)}\n\`\`\``,
+    )
+    .join("\n\n");
+
+  return `Your previous response parsed as JSON and its valid findings were accepted, but ${invalid.length} finding(s) had invalid or missing fields and were rejected.
+
+Do not redo the investigation and do not use tools. Re-emit ONLY the rejected findings listed below, corrected to satisfy the schema. Keep the substance (title, description, reasoning) unchanged — fix only the invalid fields.
+
+${perFinding}
+
+Return ONLY a JSON array in this exact shape, containing one entry per filePath with ONLY the corrected findings (do not repeat findings that were already accepted):
+
+\`\`\`json
+[
+  {
+    "filePath": "relative/path/to/file.ts",
+    "findings": [
+      {
+        "severity": "HIGH",
+        "vulnSlug": "the-vuln-slug-or-other",
+        "title": "Brief title of the issue",
+        "description": "Detailed description",
+        "lineNumbers": [10, 15],
+        "recommendation": "How to fix this vulnerability",
+        "confidence": "high"
+      }
+    ]
+  }
+]
+\`\`\`
+
+\`severity\` must be one of \`CRITICAL\`, \`HIGH\`, \`MEDIUM\`, \`HIGH_BUG\`, or \`BUG\`. \`confidence\` must be one of \`high\`, \`medium\`, or \`low\` (lowercase). \`lineNumbers\` must be an array of numbers. \`title\`, \`description\`, \`recommendation\`, and \`vulnSlug\` must be strings.`;
+}
+
+function investigateFindingSignature(f: Finding): string {
+  return `${f.vulnSlug}::${f.title.trim().toLowerCase()}`;
+}
+
+/**
+ * In-session field-repair loop, shared by every agent plugin. When the
+ * initial investigation response parses as JSON but some findings fail
+ * field validation, keep the valid ones and ask the SAME session
+ * (tool-free) to re-emit just the invalid ones, corrected — up to
+ * `maxRepairs` times. Repaired findings merge into the kept results by
+ * (vulnSlug, title) signature so a model that re-emits an already-accepted
+ * finding doesn't duplicate it.
+ *
+ * Findings still invalid when the loop ends are dropped — loudly: a
+ * progress message plus a `writeParseFailureDebug` dump of the offenders.
+ */
+export async function* runInvestigateFieldRepairLoop(params: {
+  results: InvestigateResult[];
+  invalid: InvalidFindingEntry[];
+  batch: FileRecord[];
+  followUp: ((prompt: string) => Promise<string | undefined>) | undefined;
+  agentLabel: string;
+  agentType: string;
+  projectId?: string;
+  maxRepairs?: number;
+}): AsyncGenerator<AgentProgress, { results: InvestigateResult[]; repairAttempts: number }> {
+  const { batch, followUp, agentLabel, agentType, projectId, maxRepairs = 2 } = params;
+  const results = params.results;
+  let invalid = params.invalid;
+  let repairAttempts = 0;
+
+  while (invalid.length > 0 && repairAttempts < maxRepairs && followUp) {
+    repairAttempts++;
+    yield {
+      type: "thinking",
+      message: `${agentLabel}: ${invalid.length} finding(s) failed field validation; requesting field-repair (attempt ${repairAttempts}/${maxRepairs})`,
+    };
+
+    const prompt = buildInvestigateFieldRepairPrompt(invalid);
+    const repairText = await followUp(prompt);
+    if (repairText === undefined) break;
+
+    let repaired: ParsedInvestigateResults;
+    try {
+      repaired = parseInvestigateResults(repairText, batch);
+    } catch {
+      yield {
+        type: "thinking",
+        message: `${agentLabel}: field-repair response was not parseable JSON; stopping repair`,
+      };
+      break;
+    }
+
+    for (const entry of repaired.results) {
+      if (entry.findings.length === 0) continue;
+      const target = results.find((r) => r.filePath === entry.filePath);
+      if (!target) continue;
+      const seen = new Set(target.findings.map(investigateFindingSignature));
+      for (const f of entry.findings) {
+        if (!seen.has(investigateFindingSignature(f))) {
+          seen.add(investigateFindingSignature(f));
+          target.findings.push(f);
+        }
+      }
+    }
+
+    invalid = repaired.invalid;
+  }
+
+  if (invalid.length > 0) {
+    const summary = invalid
+      .map((e) => `${e.filePath}: ${e.issues}`)
+      .slice(0, 5)
+      .join(" | ");
+    yield {
+      type: "thinking",
+      message: `${agentLabel}: dropping ${invalid.length} finding(s) that failed field validation after ${repairAttempts} repair attempt(s): ${summary}`,
+    };
+    writeParseFailureDebug({
+      projectId,
+      phase: "investigate",
+      agentType,
+      resultText: JSON.stringify(invalid, null, 2),
+      error: new Error(
+        `${invalid.length} finding(s) failed field validation after ${repairAttempts} field-repair attempt(s)`,
+      ),
+      batch,
+    });
+  }
+
+  return { results, repairAttempts };
 }
 
 // --- Revalidation prompt ---------------------------------------------------
