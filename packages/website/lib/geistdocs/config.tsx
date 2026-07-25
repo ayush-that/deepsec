@@ -10,14 +10,6 @@ export const github = {
 
 const nav = [
   {
-    label: "Why full-repo",
-    href: "/#why",
-  },
-  {
-    label: "How it works",
-    href: "/#workflow",
-  },
-  {
     label: "Docs",
     href: "/docs",
   },
