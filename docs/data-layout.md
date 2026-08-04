@@ -29,7 +29,7 @@ never credential values.
 
 The schemas below are the source of truth for any tool that reads
 `data/` directly. They live in
-[`packages/core/src/types.ts`](../packages/core/src/types.ts).
+[`packages/core/src/types.ts`](https://github.com/vercel-labs/deepsec/blob/main/packages/core/src/types.ts).
 
 ## project.json — `ProjectConfig`
 

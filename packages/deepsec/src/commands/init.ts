@@ -22,6 +22,7 @@ import {
   parseSetupOutputMode,
   type SetupOutputMode,
   SetupProtocolError,
+  setSetupDocumentationWorkspace,
 } from "../setup/protocol.js";
 import { createSetupReporter, printSetupSummary } from "../setup/reporter.js";
 import { getDeepsecWorkspaceDependency } from "../version.js";
@@ -65,6 +66,7 @@ export async function initCommand(opts: InitOpts) {
   const targetArg = opts.targetRoot ?? ".";
 
   const workspaceDir = path.resolve(process.cwd(), workspaceArg);
+  setSetupDocumentationWorkspace(workspaceDir);
   const deepsecDependency = getDeepsecWorkspaceDependency();
   const headless = shouldUseHeadlessMode(opts);
   const outputMode = parseSetupOutputMode(opts.output);

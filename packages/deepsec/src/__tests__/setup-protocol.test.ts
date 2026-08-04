@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatSetupErrorHuman,
   SetupProtocolError,
+  setSetupDocumentationWorkspace,
   setupErrorExitCode,
   setupErrorPayload,
 } from "../setup/protocol.js";
@@ -29,5 +30,20 @@ describe("headless setup protocol", () => {
         new SetupProtocolError({ code: "COST_LIMIT_REACHED", message: "Stopped", kind: "limit" }),
       ),
     ).toBe(3);
+  });
+
+  it("points agents at documentation installed in the isolated workspace", () => {
+    setSetupDocumentationWorkspace("/tmp/example/.deepsec");
+    const error = new SetupProtocolError({ code: "SETUP_STOPPED", message: "Stopped" });
+    const payload = setupErrorPayload(error);
+
+    expect(payload.documentation).toMatchObject({
+      skill: "/tmp/example/.deepsec/node_modules/deepsec/SKILL.md",
+      gettingStarted: "/tmp/example/.deepsec/node_modules/deepsec/dist/docs/getting-started.md",
+      vercelSetup: "/tmp/example/.deepsec/node_modules/deepsec/dist/docs/vercel-setup.md",
+    });
+    expect(formatSetupErrorHuman(error)).toContain(
+      "cat '/tmp/example/.deepsec/node_modules/deepsec/SKILL.md'",
+    );
   });
 });

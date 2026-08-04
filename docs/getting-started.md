@@ -87,6 +87,25 @@ because environment pull reads the linked project's development environment.
 
 ## Agents and headless clients
 
+### Read the installed documentation
+
+Deepsec installs its agent skill and complete documentation inside the isolated
+workspace. From the repository root, an agent should read the skill first and
+then the relevant topic:
+
+```bash
+cat .deepsec/node_modules/deepsec/SKILL.md
+cat .deepsec/node_modules/deepsec/dist/docs/getting-started.md
+cat .deepsec/node_modules/deepsec/dist/docs/vercel-setup.md
+```
+
+All packaged topics are under
+`.deepsec/node_modules/deepsec/dist/docs/`. From inside `.deepsec`, omit the
+leading `.deepsec/`; replace it with the custom workspace path when `init` was
+given one. Structured setup errors include absolute `documentation` paths so
+agents do not need to guess. These workspace copies exist after the install
+phase; before then, use `npx deepsec init --help` or the repository docs.
+
 When stdin or stdout is not a TTY, Deepsec automatically uses headless mode:
 it never prompts, launches a browser, or starts an interactive login. Agents
 can inspect the complete plan without writing anything:

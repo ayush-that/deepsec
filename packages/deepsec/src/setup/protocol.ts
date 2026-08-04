@@ -1,4 +1,41 @@
+import path from "node:path";
+
 export type SetupOutputMode = "human" | "json" | "jsonl";
+
+export interface SetupDocumentation {
+  packageRoot: string;
+  skill: string;
+  docsDirectory: string;
+  gettingStarted: string;
+  vercelSetup: string;
+  models: string;
+  configuration: string;
+  faq: string;
+  note: string;
+}
+
+let setupDocumentationWorkspace: string | undefined;
+
+export function setSetupDocumentationWorkspace(workspaceDir: string): void {
+  setupDocumentationWorkspace = path.resolve(workspaceDir);
+}
+
+export function setupDocumentation(): SetupDocumentation | undefined {
+  if (!setupDocumentationWorkspace) return undefined;
+  const packageRoot = path.join(setupDocumentationWorkspace, "node_modules", "deepsec");
+  const docsDirectory = path.join(packageRoot, "dist", "docs");
+  return {
+    packageRoot,
+    skill: path.join(packageRoot, "SKILL.md"),
+    docsDirectory,
+    gettingStarted: path.join(docsDirectory, "getting-started.md"),
+    vercelSetup: path.join(docsDirectory, "vercel-setup.md"),
+    models: path.join(docsDirectory, "models.md"),
+    configuration: path.join(docsDirectory, "configuration.md"),
+    faq: path.join(docsDirectory, "faq.md"),
+    note: "Read SKILL.md first, then the relevant file in dist/docs. These workspace paths become available after install; if they are missing, run npx deepsec init --help first.",
+  };
+}
 
 export interface SetupAction {
   id: string;
@@ -56,6 +93,7 @@ export function parseSetupOutputMode(value: string | undefined): SetupOutputMode
 }
 
 export function setupErrorPayload(error: unknown): Record<string, unknown> {
+  const documentation = setupDocumentation();
   if (error instanceof SetupProtocolError) {
     return {
       type: error.kind,
@@ -64,6 +102,7 @@ export function setupErrorPayload(error: unknown): Record<string, unknown> {
       missingInputs: error.missingInputs,
       choices: error.choices,
       actions: error.actions,
+      ...(documentation ? { documentation } : {}),
       ...(error.details ? { details: error.details } : {}),
     };
   }
@@ -71,6 +110,7 @@ export function setupErrorPayload(error: unknown): Record<string, unknown> {
     type: "failure",
     code: error instanceof Error ? error.name : "Error",
     message: error instanceof Error ? error.message : String(error),
+    ...(documentation ? { documentation } : {}),
   };
 }
 
@@ -94,7 +134,25 @@ export function formatSetupErrorHuman(error: SetupProtocolError): string {
       lines.push(`  Resume with: ${action.resumeArgs.join(" ")}`);
     }
   }
+  const documentation = formatSetupDocumentationHuman();
+  if (documentation) lines.push("", documentation);
   return lines.join("\n");
+}
+
+function shellArg(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+export function formatSetupDocumentationHuman(): string | undefined {
+  const documentation = setupDocumentation();
+  if (!documentation) return undefined;
+  return [
+    "Agent documentation (installed in the isolated workspace):",
+    `  cat ${shellArg(documentation.skill)}`,
+    `  cat ${shellArg(documentation.gettingStarted)}`,
+    `  Other topics: ${documentation.docsDirectory}`,
+    `  ${documentation.note}`,
+  ].join("\n");
 }
 
 export function outputModeFromArgv(argv: string[] = process.argv): SetupOutputMode {

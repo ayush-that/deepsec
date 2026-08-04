@@ -155,7 +155,7 @@ or downstream consumption.
 ## Plugin architecture
 
 Five extension points, all defined in
-[`packages/core/src/plugin.ts`](../packages/core/src/plugin.ts):
+[`packages/core/src/plugin.ts`](https://github.com/vercel-labs/deepsec/blob/main/packages/core/src/plugin.ts):
 
 - `matchers` — additive
 - `notifiers` — additive

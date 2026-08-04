@@ -26,6 +26,7 @@ import { installSandboxOutputCap } from "./output-cap.js";
 import { applyAiGatewayDefaults } from "./preflight.js";
 import { modelRouteFromCli } from "./setup/options.js";
 import {
+  formatSetupDocumentationHuman,
   formatSetupErrorHuman,
   outputModeFromArgv,
   SetupProtocolError,
@@ -558,6 +559,10 @@ function printFatal(err: unknown): never {
   console.error(
     `\n${err instanceof SetupProtocolError ? formatSetupErrorHuman(err) : err instanceof Error ? err.message : err}`,
   );
+  if (!(err instanceof SetupProtocolError)) {
+    const documentation = formatSetupDocumentationHuman();
+    if (documentation) console.error(`\n${documentation}`);
+  }
   if (verbose && err instanceof Error && err.stack) {
     console.error(err.stack);
   } else if (!verbose) {

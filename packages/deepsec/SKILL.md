@@ -5,12 +5,10 @@ description: Use deepsec (an AI-powered vulnerability scanner) — one-shot init
 
 # deepsec
 
-`deepsec` is an AI-powered vulnerability scanner. This skill activates
-when deepsec ships inside `node_modules/` — typically because the user
-ran `npx deepsec …` (which caches the package locally). In the more
-common dedicated-git setup the user works inside a clone of
-`vercel-labs/deepsec` and the same docs sit at `docs/` from the repo root —
-read those instead when this skill fires from outside a node_modules.
+`deepsec` is an AI-powered vulnerability scanner. The one-shot initializer
+installs this skill at `.deepsec/node_modules/deepsec/SKILL.md`. From inside
+the isolated workspace the same path is `node_modules/deepsec/SKILL.md`. In a
+Deepsec source clone, use the repository's `docs/` directory instead.
 
 When the user asks how to use, configure, or extend deepsec, read the
 relevant doc before answering — the docs are the source of truth, not
@@ -18,7 +16,9 @@ your training data.
 
 ## Where the docs are
 
-`node_modules/deepsec/dist/docs/` (or `<deepsec-clone>/docs/`):
+From the target repository, `.deepsec/node_modules/deepsec/dist/docs/`; from
+inside `.deepsec`, `node_modules/deepsec/dist/docs/`; or from a Deepsec source
+clone, `<deepsec-clone>/docs/`:
 
 - `getting-started.md` — one-shot initialization and resume walkthrough
 - `configuration.md` — full `deepsec.config.ts` reference

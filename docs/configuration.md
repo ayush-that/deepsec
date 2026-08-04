@@ -22,7 +22,7 @@ export default defineConfig({
 
 For a fully-worked example exercising every common field
 (`infoMarkdown`, `promptAppend`, `priorityPaths`, an inline plugin),
-see [`samples/webapp/deepsec.config.ts`](../samples/webapp/deepsec.config.ts).
+see [`samples/webapp/deepsec.config.ts`](https://github.com/vercel-labs/deepsec/blob/main/samples/webapp/deepsec.config.ts).
 
 ## Top-level fields
 

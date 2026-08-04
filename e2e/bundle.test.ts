@@ -57,6 +57,31 @@ describe("bundle e2e", () => {
     expect(dts).not.toMatch(/from\s+["']@deepsec\//);
   });
 
+  it("ships the complete, internally linked agent documentation", () => {
+    const packageRoot = path.join(ROOT, "packages/deepsec");
+    const docsRoot = path.join(packageRoot, "dist/docs");
+    const meta = JSON.parse(fs.readFileSync(path.join(docsRoot, "meta.json"), "utf-8")) as {
+      pages: string[];
+    };
+
+    expect(fs.existsSync(path.join(packageRoot, "SKILL.md"))).toBe(true);
+    for (const page of meta.pages) {
+      expect(fs.existsSync(path.join(docsRoot, `${page}.md`)), page).toBe(true);
+    }
+
+    for (const file of fs.readdirSync(docsRoot).filter((name) => name.endsWith(".md"))) {
+      const markdown = fs.readFileSync(path.join(docsRoot, file), "utf-8");
+      for (const match of markdown.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+        const target = match[1].split("#")[0];
+        if (!target || /^(?:https?:|mailto:)/.test(target)) continue;
+        expect(
+          fs.existsSync(path.resolve(docsRoot, path.dirname(file), target)),
+          `${file}: ${target}`,
+        ).toBe(true);
+      }
+    }
+  });
+
   it("--version reports the current package version", () => {
     const { stdout, status } = runBundle(["--version"]);
     expect(status).toBe(0);
@@ -217,6 +242,17 @@ export default defineConfig({
       type: "needs_input",
       code: "MODEL_SELECTION_REQUIRED",
       missingInputs: ["model.profile"],
+      documentation: {
+        skill: path.join(workspace, "node_modules", "deepsec", "SKILL.md"),
+        gettingStarted: path.join(
+          workspace,
+          "node_modules",
+          "deepsec",
+          "dist",
+          "docs",
+          "getting-started.md",
+        ),
+      },
     });
     expect(result.stdout).not.toContain("Model access");
   });

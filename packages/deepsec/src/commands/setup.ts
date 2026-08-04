@@ -12,6 +12,7 @@ import {
   parseSetupOutputMode,
   type SetupOutputMode,
   SetupProtocolError,
+  setSetupDocumentationWorkspace,
 } from "../setup/protocol.js";
 import { createSetupReporter, printSetupSummary } from "../setup/reporter.js";
 import { readSetupState } from "../setup/state.js";
@@ -42,6 +43,7 @@ export interface SetupCommandOptions extends ModelRouteCliOptions {
 }
 
 export async function setupCommand(options: SetupCommandOptions): Promise<void> {
+  setSetupDocumentationWorkspace(process.cwd());
   const headless = shouldUseHeadlessMode(options);
   const outputMode = parseSetupOutputMode(options.output);
   const projectId = resolveProjectId(options.projectId);
@@ -49,6 +51,7 @@ export async function setupCommand(options: SetupCommandOptions): Promise<void> 
   const configPath = getConfigPath();
   if (!configPath) throw new Error("Run deepsec setup from a workspace with deepsec.config.ts");
   const workspaceDir = path.dirname(configPath);
+  setSetupDocumentationWorkspace(workspaceDir);
   const projectRoot = options.root
     ? path.resolve(options.root)
     : project

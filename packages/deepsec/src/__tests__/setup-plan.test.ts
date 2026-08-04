@@ -34,6 +34,17 @@ describe("headless setup plan", () => {
         }),
       ]),
     );
+    expect(plan.documentation).toMatchObject({
+      skill: path.join(workspace, "node_modules", "deepsec", "SKILL.md"),
+      gettingStarted: path.join(
+        workspace,
+        "node_modules",
+        "deepsec",
+        "dist",
+        "docs",
+        "getting-started.md",
+      ),
+    });
     expect(fs.existsSync(workspace)).toBe(false);
   });
 });

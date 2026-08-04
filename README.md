@@ -58,6 +58,11 @@ see [generated and hand-authored matchers](https://github.com/vercel-labs/deepse
 
 ## Docs
 
+After initialization, agents can read the exact documentation matching the
+installed CLI at `.deepsec/node_modules/deepsec/SKILL.md` and
+`.deepsec/node_modules/deepsec/dist/docs/`. Setup errors expose these as
+absolute machine-readable paths.
+
 - [Getting started](https://github.com/vercel-labs/deepsec/blob/main/docs/getting-started.md) — one-shot setup and resume
 - [Reviewing changes](https://github.com/vercel-labs/deepsec/blob/main/docs/reviewing-changes.md) — `process --diff` and CI gating
 - [Supported technology](https://github.com/vercel-labs/deepsec/blob/main/docs/supported-tech.md) — built-in coverage

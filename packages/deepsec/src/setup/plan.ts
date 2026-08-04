@@ -12,7 +12,12 @@ import {
 import { loadEnvFile } from "../env-file.js";
 import { listRepositoryFiles, setupRepositoryIgnoreGlobs } from "./fingerprint.js";
 import type { SupportedPackageManager } from "./install.js";
-import type { SetupAction } from "./protocol.js";
+import {
+  type SetupAction,
+  type SetupDocumentation,
+  setSetupDocumentationWorkspace,
+  setupDocumentation,
+} from "./protocol.js";
 
 export interface SetupPlan {
   type: "plan";
@@ -39,6 +44,7 @@ export interface SetupPlan {
   missingInputs: string[];
   suggestedArgs: string[];
   actions: SetupAction[];
+  documentation?: SetupDocumentation;
 }
 
 function plannedPackageManager(
@@ -68,6 +74,7 @@ export async function buildSetupPlan(options: {
   runCli?: RunVercelCli;
 }): Promise<SetupPlan> {
   const workspaceDir = path.resolve(options.workspaceDir);
+  setSetupDocumentationWorkspace(workspaceDir);
   const projectRoot = path.resolve(options.projectRoot);
   const env = { ...(options.env ?? process.env) };
   await loadEnvFile(path.join(workspaceDir, ".env.local"), env);
@@ -129,6 +136,7 @@ export async function buildSetupPlan(options: {
     projectRoot,
     setupRepositoryIgnoreGlobs(projectRoot, workspaceDir),
   );
+  const documentation = setupDocumentation();
   return {
     type: "plan",
     ready: missingInputs.length === 0,
@@ -170,5 +178,6 @@ export async function buildSetupPlan(options: {
     missingInputs,
     suggestedArgs,
     actions,
+    ...(documentation ? { documentation } : {}),
   };
 }
