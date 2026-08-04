@@ -18,6 +18,7 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import {
+  attributionHeaders,
   backoff,
   buildInvestigateJsonRepairPrompt,
   buildInvestigatePrompt,
@@ -50,6 +51,7 @@ import type {
   RevalidateParams,
   RevalidateRawResponse,
   RevalidateVerdict,
+  SetupTaskParams,
 } from "./types.js";
 
 const DEFAULT_MODEL = "zai/glm-5.2";
@@ -342,7 +344,18 @@ async function configureRuntimeAuth(runtime: ModelRuntime, cfg: PiAgentConfig): 
   }
 }
 
-function configureProviderOverrides(registry: ModelRegistry, cfg: PiAgentConfig): void {
+/** Exported for tests. */
+export function configureProviderOverrides(registry: ModelRegistry, cfg: PiAgentConfig): void {
+  // App Attribution for every request the gateway provider serves,
+  // including models from pi's builtin vercel-ai-gateway catalog: a
+  // header-only extension registration merges over the builtin provider
+  // (its model catalog survives — pi only remaps models when the
+  // extension defines `models` or `baseUrl`), and the runtime folds
+  // extension headers into each request's assembled headers. Registered
+  // unconditionally: this provider only ever talks to the gateway host,
+  // so the headers can't leak to direct providers.
+  registry.registerProvider(GATEWAY_PROVIDER, { headers: attributionHeaders() });
+
   if (process.env.ANTHROPIC_BASE_URL) {
     registry.registerProvider("anthropic", { baseUrl: process.env.ANTHROPIC_BASE_URL });
   }
@@ -422,6 +435,10 @@ function registerGatewayModelIfNeeded(
     apiKey: getGatewayCredential() ?? "$AI_GATEWAY_API_KEY",
     api: GATEWAY_API,
     models,
+    // Re-registration merges over the attribution-only registration from
+    // configureProviderOverrides; repeat the headers so this call is
+    // correct standalone (tests construct registries without overrides).
+    headers: attributionHeaders(),
   });
 }
 
@@ -822,6 +839,35 @@ async function runToollessFollowUp(
   } finally {
     session.setActiveToolsByName(previousTools);
     if (signal) signal.removeEventListener("abort", abort);
+  }
+}
+
+export async function runPiSetupTask(params: SetupTaskParams): Promise<string> {
+  const cfg = readConfig(params.config);
+  const setup = await createPiSession(params.projectRoot, cfg);
+  try {
+    params.onProgress?.({
+      type: "started",
+      message: `Understanding repository with Pi (${setup.modelLabel})`,
+    });
+    const generator = runPiPrompt({
+      session: setup.session,
+      prompt: params.prompt,
+      label: "setup",
+      maxTurns: cfg.maxTurns ?? 40,
+      signal: params.signal,
+    });
+    let next = await generator.next();
+    while (!next.done) {
+      params.onProgress?.(next.value);
+      next = await generator.next();
+    }
+    const text = next.value.resultText.trim();
+    if (!text) throw new Error("Pi produced no setup result");
+    params.onProgress?.({ type: "complete", message: "Repository setup analysis complete" });
+    return text;
+  } finally {
+    setup.session.dispose();
   }
 }
 

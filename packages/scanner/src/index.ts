@@ -21,6 +21,17 @@ import type { MatcherRegistry } from "./matcher-registry.js";
 import { createDefaultRegistry } from "./matchers/index.js";
 import type { MatcherPlugin, ScannerDriver, ScanProgress } from "./types.js";
 
+export type {
+  CompileDeclarativeMatcherOptions,
+  DeclarativeMatcherPlugin,
+  DeclarativeMatcherSpec,
+} from "./declarative-matcher.js";
+export {
+  compileDeclarativeMatcher,
+  compileDeclarativeMatchers,
+  declarativeMatcherSpecSchema,
+  declarativeMatcherSpecsSchema,
+} from "./declarative-matcher.js";
 export type { DetectedTech } from "./detect-tech.js";
 export { detectTech, readTechJson, writeTechJson } from "./detect-tech.js";
 export { MatcherRegistry } from "./matcher-registry.js";
@@ -120,6 +131,7 @@ export const IGNORE_DIRS = [
   "**/.deepsec/data/**",
   "**/dist/**",
   "**/build/**",
+  "**/target/**",
   "**/.next/**",
   "**/coverage/**",
   "**/.turbo/**",

@@ -8,7 +8,7 @@ import { defaultModelForAgent } from "../agent-defaults.js";
 import { resolveFiles } from "../file-sources.js";
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../formatters.js";
 import { renderPrComment } from "../pr-comment.js";
-import { assertAgentCredential } from "../preflight.js";
+import { applyConfiguredModelRoute, assertAgentCredential } from "../preflight.js";
 import { renderQuotaMessage } from "../quota-message.js";
 import { resolveAgentType } from "../resolve-agent-type.js";
 import { resolveProjectId, resolveProjectIdForDirect } from "../resolve-project-id.js";
@@ -129,6 +129,7 @@ async function processStandardMode(opts: Parameters<typeof processCommand>[0]) {
   const model = opts.model ?? defaultModelForAgent(agentType);
   const agentConfig = buildAgentConfig({ ...opts, model });
 
+  if (!opts.aiApiKeyEnv && !opts.aiBaseUrl) await applyConfiguredModelRoute(agentType);
   assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
 
   // --reinvestigate  → true (re-investigate all)
@@ -275,6 +276,7 @@ async function processDirectMode(opts: Parameters<typeof processCommand>[0]) {
   const agentType = resolveAgentType(opts.agent);
   const model = opts.model ?? defaultModelForAgent(agentType);
   const agentConfig = buildAgentConfig({ ...opts, model });
+  if (!opts.aiApiKeyEnv && !opts.aiBaseUrl) await applyConfiguredModelRoute(agentType);
   assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
 
   // Resolve the file list.

@@ -4,7 +4,7 @@ import { revalidate } from "@deepsec/processor";
 import { buildAgentConfig } from "../agent-config.js";
 import { defaultModelForAgent } from "../agent-defaults.js";
 import { BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW } from "../formatters.js";
-import { assertAgentCredential } from "../preflight.js";
+import { applyConfiguredModelRoute, assertAgentCredential } from "../preflight.js";
 import { renderQuotaMessage } from "../quota-message.js";
 import { resolveAgentType } from "../resolve-agent-type.js";
 import { resolveProjectId } from "../resolve-project-id.js";
@@ -89,6 +89,7 @@ export async function revalidateCommand(opts: {
   const onlySlugs = parseCsv(opts.onlySlugs);
   const skipSlugs = parseCsv(opts.skipSlugs);
 
+  if (!opts.aiApiKeyEnv && !opts.aiBaseUrl) await applyConfiguredModelRoute(agentType);
   assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
 
   console.log(`${BOLD}Revalidating${RESET} findings for project ${BOLD}${projectId}${RESET}`);

@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -165,13 +166,73 @@ export default defineConfig({
     }
   });
 
-  it("init scaffolds a minimal workspace seeded with the first project", () => {
+  it("init --plan is read-only and emits machine-readable setup intent", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-plan-e2e-"));
+    const targetRoot = path.join(tmp, "app");
+    const workspace = path.join(tmp, ".deepsec");
+    fs.mkdirSync(targetRoot);
+    fs.writeFileSync(path.join(targetRoot, "index.ts"), "export const value = 1;\n");
+
+    const result = runBundle(
+      [
+        "init",
+        workspace,
+        targetRoot,
+        "--plan",
+        "--model",
+        "gpt-5.6-sol",
+        "--agent",
+        "codex",
+        "--output",
+        "json",
+      ],
+      {
+        env: {
+          VERCEL_TOKEN: "test-token",
+          VERCEL_TEAM_ID: "team_test",
+          VERCEL_PROJECT_ID: "prj_test",
+        },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      type: "plan",
+      repository: { id: "app", files: 1 },
+      workspace: { exists: false },
+    });
+    expect(fs.existsSync(workspace)).toBe(false);
+  });
+
+  it("headless init returns structured model input instead of prompting", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-headless-e2e-"));
+    const targetRoot = path.join(tmp, "app");
+    const workspace = path.join(tmp, ".deepsec");
+    fs.mkdirSync(targetRoot);
+
+    const result = runBundle(["init", workspace, targetRoot, "--output", "json"]);
+
+    expect(result.status).toBe(2);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      type: "needs_input",
+      code: "MODEL_SELECTION_REQUIRED",
+      missingInputs: ["model.profile"],
+    });
+    expect(result.stdout).not.toContain("Model access");
+  });
+
+  it("init --scaffold-only writes a workspace seeded with the first project", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-init-"));
     const workspace = path.join(tmp, "audits");
     const targetRoot = path.join(tmp, "my-app");
     fs.mkdirSync(targetRoot);
     try {
-      const { status, stdout, stderr } = runBundle(["init", workspace, targetRoot]);
+      const { status, stdout, stderr } = runBundle([
+        "init",
+        workspace,
+        targetRoot,
+        "--scaffold-only",
+      ]);
       expect(status, `stdout: ${stdout}\nstderr: ${stderr}`).toBe(0);
       expect(stdout).toContain("Created");
       expect(stdout).toContain("First project:");
@@ -199,16 +260,26 @@ export default defineConfig({
       expect(fs.existsSync(path.join(workspace, "matchers"))).toBe(false);
       expect(fs.existsSync(path.join(workspace, "config.json"))).toBe(false);
 
-      // package.json: workspace dir name + deepsec dep pinned to the
-      // current package version (NOT a hardcoded literal — that would
-      // silently rot every time we publish, leaving fresh installs to
-      // resolve a stale or non-existent npm version).
+      // package.json: workspace dir name + the exact CLI package. A bundle
+      // launched from this source checkout must install the checkout itself,
+      // rather than an older npm artifact with the same package version.
       const pkg = JSON.parse(fs.readFileSync(path.join(workspace, "package.json"), "utf-8"));
       expect(pkg.name).toBe("audits");
-      const deepsecPkg = JSON.parse(
-        fs.readFileSync(path.join(ROOT, "packages/deepsec/package.json"), "utf-8"),
+      const localDependency = pathToFileURL(path.join(ROOT, "packages/deepsec")).href;
+      expect(pkg.dependencies.deepsec).toBe(localDependency);
+
+      // A local bundle must also repair a workspace produced by an earlier
+      // run that accidentally pointed at the registry package. This is the
+      // exact recovery path after install succeeded but config loading failed.
+      pkg.dependencies.deepsec = "^2.2.9";
+      fs.writeFileSync(path.join(workspace, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
+      const resumed = runBundle(["init", workspace, targetRoot, "--scaffold-only"]);
+      expect(resumed.status, `stdout: ${resumed.stdout}\nstderr: ${resumed.stderr}`).toBe(0);
+      expect(resumed.stdout).toContain("Resuming");
+      const repairedPkg = JSON.parse(
+        fs.readFileSync(path.join(workspace, "package.json"), "utf-8"),
       );
-      expect(pkg.dependencies.deepsec).toBe(`^${deepsecPkg.version}`);
+      expect(repairedPkg.dependencies.deepsec).toBe(localDependency);
       // packageManager: pinned to pnpm so a parent repo's `packageManager`
       // (e.g. yarn) doesn't make pnpm refuse to install in `.deepsec/`.
       expect(pkg.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
@@ -218,6 +289,8 @@ export default defineConfig({
       expect(configSrc).toContain('id: "my-app"');
       expect(configSrc).toContain('root: "../my-app"');
       expect(configSrc).toContain("// <deepsec:projects-insert-above>");
+      expect(configSrc).not.toContain("<deepsec:model-route>");
+      expect(configSrc).not.toMatch(/^\s*ai\s*:/m);
       expect(configSrc).not.toContain("infoMarkdown");
       expect(configSrc).not.toContain('from "node:fs"');
 
@@ -254,8 +327,19 @@ export default defineConfig({
       expect(gitignore).toContain("data/*/files/");
       expect(gitignore).toContain("data/*/runs/");
       expect(gitignore).toContain("data/*/project.json");
+      expect(gitignore).toContain("data/*/setup/");
+      expect(gitignore).toContain(".vercel/");
       // Bare `data/` line should NOT be present — that would shadow INFO.md.
       expect(gitignore).not.toMatch(/^data\/$/m);
+
+      const otherParent = path.join(tmp, "fork");
+      const sameNamedTarget = path.join(otherParent, "my-app");
+      fs.mkdirSync(sameNamedTarget, { recursive: true });
+      const mismatchedResume = runBundle(["init", workspace, sameNamedTarget, "--scaffold-only"]);
+      expect(mismatchedResume.status).not.toBe(0);
+      expect(mismatchedResume.stderr).toContain("different target root");
+      expect(mismatchedResume.stderr).toContain(targetRoot);
+      expect(mismatchedResume.stderr).toContain(sameNamedTarget);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -267,7 +351,7 @@ export default defineConfig({
     fs.mkdirSync(repo);
     fs.writeFileSync(path.join(repo, "package.json"), "{}\n");
     try {
-      const { status, stdout, stderr } = runBundle(["init"], { cwd: repo });
+      const { status, stdout, stderr } = runBundle(["init", "--scaffold-only"], { cwd: repo });
       expect(status, `stdout: ${stdout}\nstderr: ${stderr}`).toBe(0);
       // Workspace lands at .deepsec/ inside the repo.
       const workspace = path.join(repo, ".deepsec");
@@ -295,6 +379,7 @@ export default defineConfig({
         targetRoot,
         "--id",
         "internal-api",
+        "--scaffold-only",
       ]);
       expect(status, `stdout: ${stdout}\nstderr: ${stderr}`).toBe(0);
       const configSrc = fs.readFileSync(path.join(workspace, "deepsec.config.ts"), "utf-8");
@@ -343,7 +428,7 @@ export default defineConfig({
     fs.mkdirSync(firstTarget);
     fs.mkdirSync(secondTarget);
     try {
-      const init = runBundle(["init", workspace, firstTarget]);
+      const init = runBundle(["init", workspace, firstTarget, "--scaffold-only"]);
       expect(init.status, `init: ${init.stdout}\n${init.stderr}`).toBe(0);
 
       // Run init-project from inside the workspace (changes cwd via spawn).
@@ -385,7 +470,7 @@ export default defineConfig({
     const target = path.join(tmp, "first");
     fs.mkdirSync(target);
     try {
-      runBundle(["init", workspace, target]);
+      runBundle(["init", workspace, target, "--scaffold-only"]);
       const { status, stderr } = runBundle(["init-project", path.join(tmp, "does-not-exist")], {
         cwd: workspace,
       });
@@ -402,7 +487,7 @@ export default defineConfig({
     const target = path.join(tmp, "my-app");
     fs.mkdirSync(target);
     try {
-      runBundle(["init", workspace, target]);
+      runBundle(["init", workspace, target, "--scaffold-only"]);
       // Re-add the same target → same id ("my-app") → collision.
       const { status, stderr } = runBundle(["init-project", target], { cwd: workspace });
       expect(status).not.toBe(0);
@@ -433,7 +518,7 @@ export default defineConfig({
     fs.mkdirSync(firstTarget);
     fs.mkdirSync(secondTarget);
     try {
-      runBundle(["init", workspace, firstTarget]);
+      runBundle(["init", workspace, firstTarget, "--scaffold-only"]);
       // Strip the marker out of the config.
       const cfgPath = path.join(workspace, "deepsec.config.ts");
       const stripped = fs
@@ -456,7 +541,7 @@ export default defineConfig({
     fs.mkdirSync(targetRoot);
     fs.writeFileSync(path.join(targetRoot, "app.ts"), 'console.log("hi");\n');
     try {
-      const init = runBundle(["init", workspace, targetRoot]);
+      const init = runBundle(["init", workspace, targetRoot, "--scaffold-only"]);
       expect(init.status, `init: ${init.stdout}\n${init.stderr}`).toBe(0);
 
       // Symlink node_modules so the freshly-init'd workspace can resolve
@@ -485,7 +570,7 @@ export default defineConfig({
     fs.writeFileSync(path.join(repo, "package.json"), "{}\n");
     fs.writeFileSync(path.join(repo, "app.ts"), 'console.log("hi");\n');
     try {
-      const init = runBundle(["init"], { cwd: repo });
+      const init = runBundle(["init", "--scaffold-only"], { cwd: repo });
       expect(init.status, `init: ${init.stdout}\n${init.stderr}`).toBe(0);
 
       const workspace = path.join(repo, ".deepsec");
@@ -530,7 +615,7 @@ export default defineConfig({
     fs.mkdirSync(targetRoot);
     fs.writeFileSync(path.join(targetRoot, "x.ts"), "export const y = 1;\n");
     try {
-      runBundle(["init", workspace, targetRoot]);
+      runBundle(["init", workspace, targetRoot, "--scaffold-only"]);
       fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(workspace, "node_modules"), "dir");
       // No --project-id flag — config has one project, auto-resolved.
       const { status, stdout, stderr } = runBundle(["scan"], { cwd: workspace });
@@ -550,7 +635,7 @@ export default defineConfig({
     fs.mkdirSync(a);
     fs.mkdirSync(b);
     try {
-      runBundle(["init", workspace, a]);
+      runBundle(["init", workspace, a, "--scaffold-only"]);
       fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(workspace, "node_modules"), "dir");
       // Append a second project entry above the marker.
       const cfgPath = path.join(workspace, "deepsec.config.ts");

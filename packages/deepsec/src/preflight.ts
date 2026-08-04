@@ -11,7 +11,14 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getConfig } from "@deepsec/core";
 import { getVercelOidcToken } from "@vercel/oidc";
+import {
+  applyResolvedModelRoute,
+  type ModelRoute,
+  type ResolvedModelRoute,
+  resolveModelRoute,
+} from "./auth/model-route.js";
 
 // Linkable URL — printed in error messages so users can paste the
 // URL into a browser instead of hunting through the repo. Points at
@@ -75,6 +82,38 @@ export async function applyAiGatewayDefaults(): Promise<void> {
   if (!process.env.OPENAI_API_KEY) process.env.OPENAI_API_KEY = key;
   if (!process.env.ANTHROPIC_BASE_URL) process.env.ANTHROPIC_BASE_URL = GATEWAY_ANTHROPIC_BASE_URL;
   if (!process.env.OPENAI_BASE_URL) process.env.OPENAI_BASE_URL = GATEWAY_OPENAI_BASE_URL;
+}
+
+/**
+ * Expand only the explicitly selected model route. Unlike the legacy gateway
+ * helper, this never lets ambient OIDC redirect a direct/custom provider.
+ */
+export async function applySelectedModelRoute(
+  route: ModelRoute,
+  agentType: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ResolvedModelRoute> {
+  const resolved = await resolveModelRoute(route, { agentType, env });
+  applyResolvedModelRoute(resolved, env);
+  return resolved;
+}
+
+/** Rehydrate the non-secret model route persisted by one-shot setup. */
+export async function applyConfiguredModelRoute(
+  agentType: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ResolvedModelRoute | undefined> {
+  const route = getConfig()?.ai as ModelRoute | undefined;
+  if (!route) return undefined;
+  // Older scaffold-only workspaces persisted Gateway as a default even when
+  // the user intended to rely on a logged-in Codex/Claude/Pi subscription.
+  // With no explicit Gateway credential, leave env untouched and let the
+  // normal subscription-aware credential check decide whether the command can
+  // proceed.
+  if (route.mode === "gateway" && !env.AI_GATEWAY_API_KEY && !env.VERCEL_OIDC_TOKEN) {
+    return undefined;
+  }
+  return applySelectedModelRoute(route, agentType, env);
 }
 
 function isCodex(agentType: string | undefined): boolean {
@@ -166,7 +205,7 @@ const KNOWN_BACKENDS = new Set<string>(["claude-agent-sdk", "codex", "pi"]);
  */
 export function assertAgentCredential(
   agentType: string | undefined,
-  options: { inSandbox?: boolean; aiApiKeyEnv?: string } = {},
+  options: { inSandbox?: boolean; aiApiKeyEnv?: string; modelRoute?: ModelRoute } = {},
 ): void {
   if (agentType !== undefined && !KNOWN_BACKENDS.has(agentType)) return;
 
@@ -175,6 +214,21 @@ export function assertAgentCredential(
   const anthropicApi = process.env.ANTHROPIC_API_KEY;
   const openai = process.env.OPENAI_API_KEY;
   const custom = options.aiApiKeyEnv ? process.env[options.aiApiKeyEnv] : undefined;
+
+  // A selected route has already made precedence explicit. In particular,
+  // direct Anthropic uses ANTHROPIC_API_KEY and its x-api-key broker contract;
+  // ambient Gateway/OIDC must not be considered as a fallback.
+  if (options.modelRoute) {
+    const keyEnv =
+      options.modelRoute.apiKeyEnv ??
+      (options.modelRoute.mode === "gateway"
+        ? "AI_GATEWAY_API_KEY"
+        : options.modelRoute.provider === "anthropic"
+          ? "ANTHROPIC_API_KEY"
+          : "OPENAI_API_KEY");
+    if (process.env[keyEnv]) return;
+    throw new Error(`Selected ${options.modelRoute.provider} model route requires ${keyEnv}`);
+  }
 
   if (isCodex(agentType)) {
     // Codex prefers OPENAI_API_KEY; AI Gateway issues a single token that
@@ -203,7 +257,7 @@ export function assertAgentCredential(
     );
   }
 
-  if (anthropic) return;
+  if (anthropic || anthropicApi) return;
   if (!options.inSandbox && hasLocalClaudeAgent()) return;
   const displayAgent =
     agentType === "claude-agent-sdk" || agentType === undefined ? "claude" : agentType;
@@ -221,13 +275,14 @@ export function assertAgentCredential(
  * `vercel env pull` to land VERCEL_OIDC_TOKEN in .env.local, OR sets the
  * three explicit access-token env vars.
  */
-export function assertSandboxCredential(): void {
-  const oidc = process.env.VERCEL_OIDC_TOKEN;
+export function assertSandboxCredential(options: { env?: NodeJS.ProcessEnv } = {}): void {
+  const env = options.env ?? process.env;
+  const oidc = env.VERCEL_OIDC_TOKEN;
   if (oidc) return;
 
-  const token = process.env.VERCEL_TOKEN;
-  const teamId = process.env.VERCEL_TEAM_ID;
-  const projectId = process.env.VERCEL_PROJECT_ID;
+  const token = env.VERCEL_TOKEN;
+  const teamId = env.VERCEL_TEAM_ID;
+  const projectId = env.VERCEL_PROJECT_ID;
   if (token && teamId && projectId) return;
 
   const missing: string[] = [];

@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setLoadedConfig } from "@deepsec/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Stub @vercel/oidc so the preflight suite is hermetic: the real
@@ -20,9 +21,35 @@ vi.mock("@vercel/oidc", () => ({
 
 import {
   applyAiGatewayDefaults,
+  applyConfiguredModelRoute,
   assertAgentCredential,
   assertSandboxCredential,
 } from "../preflight.js";
+
+describe("applyConfiguredModelRoute", () => {
+  afterEach(() => setLoadedConfig({ projects: [] }));
+
+  it("rehydrates a persisted direct route from its named variable", async () => {
+    setLoadedConfig({
+      projects: [],
+      ai: { mode: "direct", provider: "openai", apiKeyEnv: "MY_OPENAI_KEY" },
+    });
+    const env = { MY_OPENAI_KEY: "secret" };
+    const resolved = await applyConfiguredModelRoute("codex", env);
+    expect(resolved?.credentialEnv).toBe("MY_OPENAI_KEY");
+    expect(env).toMatchObject({
+      OPENAI_API_KEY: "secret",
+      OPENAI_BASE_URL: "https://api.openai.com/v1",
+    });
+  });
+
+  it("leaves a credential-free scaffold gateway route to subscription auth", async () => {
+    setLoadedConfig({ projects: [], ai: { mode: "gateway", provider: "vercel" } });
+    const env = {};
+    await expect(applyConfiguredModelRoute("codex", env)).resolves.toBeUndefined();
+    expect(env).toEqual({});
+  });
+});
 
 describe("assertAgentCredential", () => {
   let saved: Record<string, string | undefined>;
@@ -71,6 +98,11 @@ describe("assertAgentCredential", () => {
 
   it("passes for claude-agent-sdk when ANTHROPIC_AUTH_TOKEN is set", () => {
     process.env.ANTHROPIC_AUTH_TOKEN = "x";
+    expect(() => assertAgentCredential("claude-agent-sdk")).not.toThrow();
+  });
+
+  it("passes for direct Anthropic when ANTHROPIC_API_KEY is set", () => {
+    process.env.ANTHROPIC_API_KEY = "x";
     expect(() => assertAgentCredential("claude-agent-sdk")).not.toThrow();
   });
 
