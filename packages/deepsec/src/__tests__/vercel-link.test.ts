@@ -177,7 +177,7 @@ describe("Vercel project link", () => {
         exitCode: 0,
         stdout: JSON.stringify({
           teams: [
-            { id: "team_1", slug: "one", name: "One" },
+            { id: "team_1", slug: "one", name: "One", current: true },
             { id: "team_2", slug: "two", name: "Two" },
           ],
         }),
@@ -196,6 +196,7 @@ describe("Vercel project link", () => {
 
     expect(error).toMatchObject({ code: "VERCEL_SCOPE_REQUIRED" });
     expect(error.choices).toHaveLength(2);
+    expect(error.choices[0]).toMatchObject({ value: "team_1", recommended: true });
     expect(error.actions[0].resumeArgs).toEqual(["--vercel-team-id", "<choice>"]);
   });
 

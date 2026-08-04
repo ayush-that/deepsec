@@ -394,14 +394,15 @@ export async function ensureVercelLink(
     const requestedTeam = explicitTeamId
       ? teams.find((team) => team.id === explicitTeamId || team.slug === explicitTeamId)
       : undefined;
-    const team =
-      requestedTeam ??
-      teams.find((candidate) => candidate.current) ??
-      (teams.length === 1 ? teams[0] : undefined);
+    // A CLI's current team is ambient local state, not a headless user's
+    // selection. Only auto-select when there is exactly one possible team;
+    // otherwise return structured choices so the driving agent can ask.
+    const team = requestedTeam ?? (teams.length === 1 ? teams[0] : undefined);
     if (!team) {
       throw new SetupProtocolError({
         code: "VERCEL_SCOPE_REQUIRED",
-        message: "Choose the Vercel team that should own the isolated Deepsec project.",
+        message:
+          "Ask the user which Vercel team should own the isolated Deepsec project, then resume with their selection.",
         missingInputs: ["vercel.teamId"],
         choices: teams.map((candidate) => ({
           value: candidate.id,
