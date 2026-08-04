@@ -232,7 +232,9 @@ export function compileDeclarativeMatcher(
     regex: new RegExp(source, flags),
     label,
   }));
-  const excluded = spec.excludeFilePatterns ?? [];
+  const excluded = (spec.excludeFilePatterns ?? []).map((glob) =>
+    makeRe(glob, { dot: true, nonegate: true, nocomment: true }),
+  );
   const detachedSpec = cloneSpec(spec);
 
   return {
@@ -251,11 +253,7 @@ export function compileDeclarativeMatcher(
     declarativeSpec: detachedSpec,
     match(content, filePath) {
       const normalizedPath = filePath.replaceAll("\\", "/");
-      if (
-        excluded.some((glob) =>
-          minimatch(normalizedPath, glob, { dot: true, nonegate: true, nocomment: true }),
-        )
-      ) {
+      if (excluded.some((pattern) => pattern !== false && pattern.test(normalizedPath))) {
         return [];
       }
       return regexMatcher(spec.slug, patterns, content);

@@ -127,9 +127,9 @@ async function processStandardMode(opts: Parameters<typeof processCommand>[0]) {
   const effectiveRoot = opts.root ?? project.rootPath;
   const agentType = resolveAgentType(opts.agent);
   const model = opts.model ?? defaultModelForAgent(agentType);
-  const agentConfig = buildAgentConfig({ ...opts, model });
-
-  if (!opts.aiApiKeyEnv && !opts.aiBaseUrl) await applyConfiguredModelRoute(agentType);
+  const resolvedRoute =
+    !opts.aiApiKeyEnv && !opts.aiBaseUrl ? await applyConfiguredModelRoute(agentType) : undefined;
+  const agentConfig = buildAgentConfig({ ...opts, model, modelRoute: resolvedRoute?.route });
   assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
 
   // --reinvestigate  → true (re-investigate all)
@@ -275,8 +275,9 @@ async function processDirectMode(opts: Parameters<typeof processCommand>[0]) {
 
   const agentType = resolveAgentType(opts.agent);
   const model = opts.model ?? defaultModelForAgent(agentType);
-  const agentConfig = buildAgentConfig({ ...opts, model });
-  if (!opts.aiApiKeyEnv && !opts.aiBaseUrl) await applyConfiguredModelRoute(agentType);
+  const resolvedRoute =
+    !opts.aiApiKeyEnv && !opts.aiBaseUrl ? await applyConfiguredModelRoute(agentType) : undefined;
+  const agentConfig = buildAgentConfig({ ...opts, model, modelRoute: resolvedRoute?.route });
   assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
 
   // Resolve the file list.

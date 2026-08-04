@@ -62,16 +62,29 @@ function checkedUrl(value: string, label: string): URL {
   return url;
 }
 
-function assertCompatible(route: ModelRoute, agentType: string): void {
+export function modelRouteCompatibilityError(
+  route: ModelRoute,
+  agentType: string,
+): string | undefined {
   if (route.mode === "custom" && agentType !== "pi") {
-    throw new Error(`Custom model routes require --agent pi (received ${agentType})`);
+    return `Custom model routes require --agent pi (received ${agentType})`;
   }
   if (route.mode === "direct" && route.provider === "anthropic" && agentType === "codex") {
-    throw new Error("Direct Anthropic credentials are not compatible with --agent codex");
+    return "Direct Anthropic credentials are not compatible with --agent codex";
   }
   if (route.mode === "direct" && route.provider === "openai" && agentType === "claude-agent-sdk") {
-    throw new Error("Direct OpenAI credentials are not compatible with --agent claude");
+    return "Direct OpenAI credentials are not compatible with --agent claude";
   }
+  return undefined;
+}
+
+function assertCompatible(route: ModelRoute, agentType: string): void {
+  const error = modelRouteCompatibilityError(route, agentType);
+  if (error) throw new Error(error);
+}
+
+export function defaultCredentialHeaderScheme(name: string): CredentialHeaderScheme {
+  return name.toLowerCase() === "authorization" ? "bearer" : "raw";
 }
 
 function headerValue(scheme: CredentialHeaderScheme, credential: string): string {
@@ -165,9 +178,7 @@ export async function resolveModelRoute(
     (route.authHeader
       ? {
           name: route.authHeader,
-          scheme:
-            route.authScheme ??
-            (route.authHeader.toLowerCase() === "authorization" ? "bearer" : "raw"),
+          scheme: route.authScheme ?? defaultCredentialHeaderScheme(route.authHeader),
         }
       : undefined);
   if (!credentialHeader?.name || !/^[A-Za-z0-9-]+$/.test(credentialHeader.name)) {

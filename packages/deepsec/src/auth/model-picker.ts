@@ -226,10 +226,10 @@ export async function resolveModelProfile(options: {
   };
 }
 
-function inferredHarness(slug: string): ModelHarness {
-  if (slug.includes("/")) return "pi";
+export function inferModelHarness(slug: string): ModelHarness {
   if (/^(?:openai\/)?gpt-/i.test(slug)) return "codex";
   if (/^(?:anthropic\/)?claude-/i.test(slug)) return "claude";
+  if (slug.includes("/")) return "pi";
   return "pi";
 }
 
@@ -297,7 +297,7 @@ export async function promptForModelSelection(options: {
     if (!slug || /\s/.test(slug)) {
       throw new Error("Model slug must be a non-empty value without spaces");
     }
-    let agent = requiredHarness ?? inferredHarness(slug);
+    let agent = requiredHarness ?? inferModelHarness(slug);
     if (!requiredHarness) {
       const harnessAnswer = (
         await prompt.question(`Agent harness (codex, claude, pi) [${agent}]: `)

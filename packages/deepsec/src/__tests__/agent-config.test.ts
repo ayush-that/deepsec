@@ -27,6 +27,26 @@ describe("buildAgentConfig", () => {
     ).toThrow(/--ai-provider/);
   });
 
+  it("propagates a persisted custom route into Pi runtime configuration", () => {
+    expect(
+      buildAgentConfig({
+        model: "acme/security-model",
+        modelRoute: {
+          mode: "custom",
+          provider: "acme",
+          baseUrl: "https://models.acme.test/v1",
+          apiKeyEnv: "ACME_MODEL_KEY",
+          credentialHeader: { name: "x-api-key", scheme: "raw" },
+        },
+      }),
+    ).toMatchObject({
+      aiProvider: "acme",
+      aiBaseUrl: "https://models.acme.test/v1",
+      aiApiKeyEnv: "ACME_MODEL_KEY",
+      aiCredentialHeader: { name: "x-api-key", scheme: "raw" },
+    });
+  });
+
   it("maps --thinking-level to both harness config keys", () => {
     expect(
       buildAgentConfig({

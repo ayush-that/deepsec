@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { dataDir } from "@deepsec/core";
+import { atomicWriteFileSync } from "../atomic-file.js";
 
 export type SetupPhase =
   | "scaffold"
@@ -86,11 +87,8 @@ export function readSetupState(projectId: string): SetupState | undefined {
 
 export function writeSetupState(state: SetupState): void {
   const file = setupStatePath(state.projectId);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
   state.updatedAt = new Date().toISOString();
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
-  fs.renameSync(tmp, file);
+  atomicWriteFileSync(file, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
 }
 
 export function digest(value: unknown): string {

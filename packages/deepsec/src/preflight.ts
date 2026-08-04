@@ -16,6 +16,7 @@ import { getVercelOidcToken } from "@vercel/oidc";
 import {
   applyResolvedModelRoute,
   type ModelRoute,
+  modelRouteCompatibilityError,
   type ResolvedModelRoute,
   resolveModelRoute,
 } from "./auth/model-route.js";
@@ -105,6 +106,10 @@ export async function applyConfiguredModelRoute(
 ): Promise<ResolvedModelRoute | undefined> {
   const route = getConfig()?.ai as ModelRoute | undefined;
   if (!route) return undefined;
+  // A persisted route is a default, not an explicit command-line request.
+  // Preserve the pre-onboarding behavior for cross-agent invocations by
+  // falling back to that harness's normal credential discovery.
+  if (modelRouteCompatibilityError(route, agentType)) return undefined;
   // Older scaffold-only workspaces persisted Gateway as a default even when
   // the user intended to rely on a logged-in Codex/Claude/Pi subscription.
   // With no explicit Gateway credential, leave env untouched and let the

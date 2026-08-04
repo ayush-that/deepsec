@@ -6,6 +6,7 @@ import {
   type DeclarativeMatcherPlugin,
   type DeclarativeMatcherSpec,
 } from "@deepsec/scanner";
+import { atomicWriteFileSync } from "../atomic-file.js";
 import type { CoverageReport, ExpandedSurfaceInventoryItem } from "./coverage.js";
 
 export interface ProposeMatchersOptions {
@@ -79,9 +80,7 @@ export function writeGeneratedMatchers(
 ): string {
   const file = path.join(workspaceDir, "generated-matchers.ts");
   const content = `import { compileDeclarativeMatchers, type DeepsecPlugin } from "deepsec/config";\n\nconst specs = ${JSON.stringify(specs, null, 2)};\n\nexport const generatedMatchersPlugin: DeepsecPlugin = {\n  name: "deepsec-generated-matchers",\n  matchers: compileDeclarativeMatchers(specs),\n};\n`;
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, file);
+  atomicWriteFileSync(file, content);
   return file;
 }
 

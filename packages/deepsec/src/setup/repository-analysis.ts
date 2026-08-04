@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { type AgentProgress, runSetupTask } from "@deepsec/processor";
+import { atomicWriteFileSync } from "../atomic-file.js";
 import type { SurfaceInventoryItem } from "./coverage.js";
 
 export interface RepositoryAnalysis {
@@ -26,6 +27,26 @@ const REQUIRED_HEADINGS = [
   "## Project-specific patterns to flag",
   "## Known false-positives",
 ];
+
+export const INFO_SETUP_INCOMPLETE_MARKER = "<!-- deepsec:setup-incomplete -->";
+
+const LEGACY_PLACEHOLDER_MARKERS = [
+  "replace each section",
+  "<one paragraph: what the app does",
+  "<the 3–5 most important auth primitives",
+  "<2–4 sentences: what an attacker would want",
+  "<3–5 patterns unique to this codebase",
+  "<3–5 paths/patterns that look risky",
+];
+
+export function isCompleteInfoMarkdown(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return (
+    REQUIRED_HEADINGS.every((heading) => value.includes(heading)) &&
+    !value.includes(INFO_SETUP_INCOMPLETE_MARKER) &&
+    !LEGACY_PLACEHOLDER_MARKERS.some((marker) => normalized.includes(marker))
+  );
+}
 
 export function buildRepositoryAnalysisPrompt(projectId: string): string {
   return `You are preparing project context for deepsec's first security review of project ${projectId}.
@@ -101,7 +122,7 @@ export function parseRepositoryAnalysis(raw: string, projectRoot: string): Repos
   for (const heading of REQUIRED_HEADINGS) {
     if (!infoMarkdown.includes(heading)) throw new Error(`INFO.md is missing ${heading}`);
   }
-  if (/<[^>]+>|replace each section|setup is incomplete/i.test(infoMarkdown)) {
+  if (!isCompleteInfoMarkdown(infoMarkdown)) {
     throw new Error("INFO.md still contains scaffold placeholders");
   }
   const lines = infoMarkdown.split(/\r?\n/).length;
@@ -169,9 +190,7 @@ export function writeRepositoryAnalysis(
     [infoPath, `${analysis.infoMarkdown.trim()}\n`],
     [inventoryPath, `${JSON.stringify(analysis, null, 2)}\n`],
   ] as const) {
-    const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, content);
-    fs.renameSync(tmp, file);
+    atomicWriteFileSync(file, content);
   }
   return { infoPath, inventoryPath };
 }

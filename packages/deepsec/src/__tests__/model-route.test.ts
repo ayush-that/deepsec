@@ -2,6 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import { applyResolvedModelRoute, resolveModelRoute } from "../auth/model-route.js";
 
 describe("resolveModelRoute", () => {
+  it("still rejects an explicitly selected route that is incompatible with the harness", async () => {
+    await expect(
+      resolveModelRoute(
+        { mode: "direct", provider: "openai" },
+        { agentType: "claude-agent-sdk", env: { OPENAI_API_KEY: "secret" } },
+      ),
+    ).rejects.toThrow(/not compatible with --agent claude/);
+  });
+
   it("uses OIDC only for an explicitly selected gateway route", async () => {
     const getOidcToken = vi.fn(async () => "oidc-secret");
     const resolved = await resolveModelRoute(

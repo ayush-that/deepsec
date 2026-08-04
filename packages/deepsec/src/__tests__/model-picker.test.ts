@@ -4,6 +4,7 @@ import {
   buildRecommendedModelChoices,
   DEEPSEC_BENCHMARK_URL,
   fetchBenchmarkResults,
+  inferModelHarness,
   resolveModelProfile,
 } from "../auth/model-picker.js";
 
@@ -65,6 +66,11 @@ const results: BenchmarkResult[] = [
 ];
 
 describe("DeepSecBench model picker", () => {
+  it("infers provider-prefixed OpenAI and Anthropic slugs before generic Pi slugs", () => {
+    expect(inferModelHarness("openai/gpt-5.6-sol")).toBe("codex");
+    expect(inferModelHarness("anthropic/claude-opus-5")).toBe("claude");
+    expect(inferModelHarness("xai/grok-4.5")).toBe("pi");
+  });
   it("uses the highest-scoring combo for each recommendation and normalizes price", () => {
     const choices = buildRecommendedModelChoices(results);
 

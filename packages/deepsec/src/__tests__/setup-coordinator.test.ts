@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { FileRecord } from "@deepsec/core";
+import { defineConfig, type FileRecord, setLoadedConfig } from "@deepsec/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runSetupWorkflow, type SetupWorkflowOptions } from "../setup/coordinator.js";
 
@@ -79,6 +79,7 @@ describe("one-shot setup coordinator", () => {
       findingCount: 0,
       errorBatchCount: 0,
     }));
+    let fingerprint = "source-v1";
     const services = {
       install,
       connect,
@@ -86,7 +87,7 @@ describe("one-shot setup coordinator", () => {
       scan,
       process,
       listFiles: () => ["src/route.ts"],
-      fingerprint: () => "source-v1",
+      fingerprint: () => fingerprint,
       loadRecords: () => [record],
     };
     const options = {
@@ -113,6 +114,12 @@ describe("one-shot setup coordinator", () => {
       services,
       onLog: () => undefined,
     });
+    const statePath = path.join(workspace, "data", "app", "setup", "setup-state.json");
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    state.finalScanRunId = "scan-final";
+    state.finalScanSummary = { runId: "scan-final", languageStats: [] };
+    fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+    record.lastScannedRunId = "scan-final";
     const coverageOnly = await runSetupWorkflow({
       workspaceDir: workspace,
       projectId: "app",
@@ -143,5 +150,62 @@ describe("one-shot setup coordinator", () => {
     expect(config).toContain('defaultModel: "test-model"');
     expect(config).toContain('defaultThinkingLevel: "high"');
     expect(config).toContain('ai: {"mode":"direct","provider":"anthropic"');
+
+    const curatedInfo =
+      "# app\n\n## What this codebase does\nPromise<void>.\n\n## Auth shape\nNone.\n\n## Threat model\nReject <script> input.\n\n## Project-specific patterns to flag\nRoutes.\n\n## Known false-positives\nNone.\n";
+    fs.writeFileSync(path.join(workspace, "data", "app", "INFO.md"), curatedInfo);
+    fingerprint = "source-v2";
+    fs.writeFileSync(path.join(project, "src", "route.ts"), "export const POST = () => 'ok';\n");
+    await runSetupWorkflow({
+      workspaceDir: workspace,
+      projectId: "app",
+      projectRoot: project,
+      through: "threat-model",
+      services,
+      onLog: () => undefined,
+    });
+    expect(analyze).toHaveBeenCalledTimes(2);
+    expect(fs.readFileSync(path.join(workspace, "data", "app", "INFO.md"), "utf8")).toBe(
+      curatedInfo,
+    );
+  });
+
+  it("uses the new harness default model instead of a previous harness model", async () => {
+    setLoadedConfig(defineConfig({ projects: [], defaultAgent: "codex", defaultModel: "gpt-old" }));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-agent-switch-"));
+    const workspace = path.join(root, ".deepsec");
+    const project = path.join(root, "app");
+    fs.mkdirSync(path.join(workspace, "data", "app", "setup"), { recursive: true });
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(workspace, "package.json"), '{"private":true}\n');
+    fs.writeFileSync(
+      path.join(workspace, "data", "app", "setup", "setup-state.json"),
+      `${JSON.stringify({
+        version: 1,
+        projectId: "app",
+        targetRoot: project,
+        phases: {},
+        matcherAttempts: [],
+        agent: { type: "codex", model: "gpt-old" },
+        updatedAt: new Date().toISOString(),
+      })}\n`,
+    );
+
+    const result = await runSetupWorkflow({
+      workspaceDir: workspace,
+      projectId: "app",
+      projectRoot: project,
+      agent: "claude",
+      through: "install",
+      services: {
+        install: async () => ({ packageManager: "pnpm", version: "test", installed: true }),
+      },
+      onLog: () => undefined,
+    });
+
+    expect(result.state.agent).toMatchObject({
+      type: "claude-agent-sdk",
+      model: "claude-opus-4-8",
+    });
   });
 });

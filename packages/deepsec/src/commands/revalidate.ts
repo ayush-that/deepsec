@@ -84,12 +84,13 @@ export async function revalidateCommand(opts: {
   const _project = readProjectConfig(projectId);
   const agentType = resolveAgentType(opts.agent);
   const model = opts.model ?? defaultModelForAgent(agentType);
-  const agentConfig = buildAgentConfig({ ...opts, model });
   const minSeverity = opts.minSeverity as Severity | undefined;
   const onlySlugs = parseCsv(opts.onlySlugs);
   const skipSlugs = parseCsv(opts.skipSlugs);
 
-  if (!opts.aiApiKeyEnv && !opts.aiBaseUrl) await applyConfiguredModelRoute(agentType);
+  const resolvedRoute =
+    !opts.aiApiKeyEnv && !opts.aiBaseUrl ? await applyConfiguredModelRoute(agentType) : undefined;
+  const agentConfig = buildAgentConfig({ ...opts, model, modelRoute: resolvedRoute?.route });
   assertAgentCredential(agentType, { aiApiKeyEnv: opts.aiApiKeyEnv });
 
   console.log(`${BOLD}Revalidating${RESET} findings for project ${BOLD}${projectId}${RESET}`);

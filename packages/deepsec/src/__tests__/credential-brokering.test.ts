@@ -81,6 +81,23 @@ describe("credential brokering", () => {
       expect(env.CUSTOM_KEY).toBe("deepsec-sandbox-brokered-credential");
       expect(Object.values(env)).not.toContain("real-secret");
     });
+
+    it("also sets the SDK-standard placeholder for a selected gateway broker", () => {
+      const selected = {
+        host: "ai-gateway.vercel.sh",
+        placeholderEnv: "AI_GATEWAY_API_KEY",
+        header: { name: "authorization", value: "Bearer real-secret" },
+      };
+      expect(buildSandboxEnv("codex", { selected })).toMatchObject({
+        AI_GATEWAY_API_KEY: "deepsec-sandbox-brokered-credential",
+        OPENAI_API_KEY: "deepsec-sandbox-brokered-credential",
+      });
+      expect(buildSandboxEnv("claude-agent-sdk", { selected })).toMatchObject({
+        AI_GATEWAY_API_KEY: "deepsec-sandbox-brokered-credential",
+        ANTHROPIC_AUTH_TOKEN: "deepsec-sandbox-brokered-credential",
+        ANTHROPIC_API_KEY: "deepsec-sandbox-brokered-credential",
+      });
+    });
     it("never contains a real ANTHROPIC token", () => {
       process.env.ANTHROPIC_AUTH_TOKEN = "vck_supersecret_realvalue";
       process.env.ANTHROPIC_BASE_URL = "https://ai-gateway.vercel.sh";

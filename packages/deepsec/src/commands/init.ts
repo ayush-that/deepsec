@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { ensureProject } from "@deepsec/core";
 import {
   type ModelProfile,
   parseModelProfile,
@@ -18,6 +18,7 @@ import type { SupportedPackageManager } from "../setup/install.js";
 import { shouldUseHeadlessMode } from "../setup/interaction.js";
 import { acquireSetupLock } from "../setup/lock.js";
 import { buildSetupPlan } from "../setup/plan.js";
+import { deterministicVercelProjectName } from "../setup/project-name.js";
 import {
   parseSetupOutputMode,
   type SetupOutputMode,
@@ -100,17 +101,44 @@ export async function initCommand(opts: InitOpts) {
     const meaningful = fs
       .readdirSync(workspaceDir)
       .filter((e) => !IGNORED_WORKSPACE_ENTRIES.has(e));
-    if (meaningful.length > 0 && !opts.force) {
+    if (meaningful.length > 0) {
       const resumeId = validateProjectId(opts.id ?? path.basename(targetAbs));
       const projectPath = path.join(workspaceDir, "data", resumeId, "project.json");
       resuming =
         fs.existsSync(path.join(workspaceDir, "deepsec.config.ts")) && fs.existsSync(projectPath);
       if (resuming) {
-        const registeredRoot = JSON.parse(fs.readFileSync(projectPath, "utf8"))?.rootPath;
-        const canonicalRegisteredRoot =
-          typeof registeredRoot === "string" && fs.existsSync(registeredRoot)
-            ? fs.realpathSync(registeredRoot)
-            : path.resolve(String(registeredRoot ?? ""));
+        let registeredRoot: unknown;
+        try {
+          registeredRoot = JSON.parse(fs.readFileSync(projectPath, "utf8"))?.rootPath;
+        } catch {
+          if (!opts.force) {
+            throw new Error(
+              `Project registration is corrupt: ${projectPath}\n` +
+                `Rerun with --force to repair this generated file.`,
+            );
+          }
+        }
+        if (typeof registeredRoot !== "string" || !registeredRoot) {
+          if (!opts.force) {
+            throw new Error(
+              `Project registration is missing rootPath: ${projectPath}\n` +
+                `Rerun with --force to repair this generated file.`,
+            );
+          }
+          const originalCwd = process.cwd();
+          try {
+            process.chdir(workspaceDir);
+            registeredRoot = ensureProject(resumeId, targetAbs).rootPath;
+          } finally {
+            process.chdir(originalCwd);
+          }
+        }
+        if (typeof registeredRoot !== "string" || !registeredRoot) {
+          throw new Error(`Could not repair project registration: ${projectPath}`);
+        }
+        const canonicalRegisteredRoot = fs.existsSync(registeredRoot)
+          ? fs.realpathSync(registeredRoot)
+          : path.resolve(registeredRoot);
         if (canonicalRegisteredRoot !== targetAbs) {
           throw new Error(
             `Cannot resume project "${resumeId}" with a different target root.\n` +
@@ -120,7 +148,7 @@ export async function initCommand(opts: InitOpts) {
           );
         }
       }
-      if (!resuming) {
+      if (!resuming && !opts.force) {
         throw new Error(
           `Workspace directory is not empty: ${workspaceDir}\n` +
             `Use --force to write into a non-empty directory.`,
@@ -340,17 +368,6 @@ export async function initCommand(opts: InitOpts) {
   console.log();
   console.log(`  ${DIM}# --project-id is auto-resolved while there's only one project.${RESET}`);
   console.log(`  ${DIM}# Register another codebase later: deepsec init-project <root>${RESET}`);
-}
-
-function deterministicVercelProjectName(projectId: string, targetRoot: string): string {
-  const slug =
-    projectId
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "project";
-  const suffix = createHash("sha256").update(path.resolve(targetRoot)).digest("hex").slice(0, 8);
-  return `deepsec-${slug}-${suffix}`;
 }
 
 function printAgentPrompt(id: string, targetRel: string): void {

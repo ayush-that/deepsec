@@ -152,6 +152,9 @@ cd .deepsec
 pnpm deepsec setup --status --output json
 ```
 
+Duration values always require an explicit unit: `ms`, `s`, `m`, or `h`.
+Bare numbers are rejected rather than guessed.
+
 JSON mode emits one final object. JSONL streams setup events followed by a
 `complete`, `stopped`, `needs_input`, `limit`, or `failure` object. Exit code 2
 means user/configuration input is needed; exit code 3 means a requested cost or

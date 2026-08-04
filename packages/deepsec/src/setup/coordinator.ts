@@ -21,6 +21,7 @@ import {
 } from "@deepsec/scanner";
 import { buildAgentConfig } from "../agent-config.js";
 import { defaultModelForAgent } from "../agent-defaults.js";
+import { atomicWriteFileSync } from "../atomic-file.js";
 import {
   type ConnectionVerificationCheckpoint,
   ensureConnectedWorkspace,
@@ -49,6 +50,7 @@ import { SetupProtocolError } from "./protocol.js";
 import { phaseLabel, type SetupReporter } from "./reporter.js";
 import {
   analyzeRepository,
+  isCompleteInfoMarkdown,
   type RepositoryAnalysis,
   writeRepositoryAnalysis,
 } from "./repository-analysis.js";
@@ -153,12 +155,7 @@ function workflowResult(
 
 function infoIsComplete(file: string): boolean {
   if (!fs.existsSync(file)) return false;
-  const value = fs.readFileSync(file, "utf8");
-  return (
-    value.includes("## Threat model") &&
-    value.includes("## Auth shape") &&
-    !/<[^>]+>|replace each section|setup is incomplete/i.test(value)
-  );
+  return isCompleteInfoMarkdown(fs.readFileSync(file, "utf8"));
 }
 
 function readInventory(file: string): RepositoryAnalysis | undefined {
@@ -375,9 +372,10 @@ export async function runSetupWorkflow(
   try {
     const existingState = readSetupState(options.projectId);
     const agentType = resolveAgentType(options.agent ?? existingState?.agent.type);
-    const model = options.model ?? existingState?.agent.model ?? defaultModelForAgent(agentType);
+    const previousModel =
+      existingState?.agent.type === agentType ? existingState.agent.model : undefined;
+    const model = options.model ?? previousModel ?? defaultModelForAgent(agentType);
     const thinkingLevel = options.thinkingLevel ?? existingState?.agent.thinkingLevel;
-    const agentConfig = buildAgentConfig({ model, thinkingLevel });
     const state =
       existingState ??
       createSetupState({
@@ -439,6 +437,7 @@ export async function runSetupWorkflow(
         mode: "gateway",
         provider: "vercel",
       };
+    const agentConfig = buildAgentConfig({ model, thinkingLevel, modelRoute: route });
     reconcileWorkspaceConfig(workspaceDir, route, agentType, model, thinkingLevel);
 
     const loaded = await loadConfig(workspaceDir);
@@ -482,7 +481,14 @@ export async function runSetupWorkflow(
     const infoPath = path.join(projectDataDir, "INFO.md");
     const inventoryPath = path.join(projectDataDir, "setup", "surface-inventory.json");
     let analysis = readInventory(inventoryPath);
-    const infoInput = digest({ projectRoot, agentType, model, thinkingLevel, rubricVersion: 1 });
+    const infoInput = digest({
+      projectRoot,
+      sourceFingerprint,
+      agentType,
+      model,
+      thinkingLevel,
+      rubricVersion: 2,
+    });
     if (
       !analysis ||
       !infoIsComplete(infoPath) ||
@@ -502,7 +508,7 @@ export async function runSetupWorkflow(
         }),
       );
       writeRepositoryAnalysis(projectDataDir, analysis);
-      if (preserveInfo) fs.writeFileSync(infoPath, preserveInfo);
+      if (preserveInfo) atomicWriteFileSync(infoPath, preserveInfo);
       state.infoDigest = digest(fs.readFileSync(infoPath, "utf8"));
       state.inventoryDigest = digest(analysis.surfaces);
       writeSetupState(state);
@@ -559,13 +565,14 @@ export async function runSetupWorkflow(
       };
       writeSetupState(state);
     } else {
+      const activeScanSummary = state.finalScanSummary ?? state.baselineScanSummary;
       baselineResult = {
-        runId: state.baselineScanSummary.runId,
+        runId: activeScanSummary.runId,
         candidateCount: 0,
         detected: { tags: [], sentinels: [], detectedAt: "", rootPath: projectRoot },
         activeMatchers: [],
         skippedMatchers: [],
-        languageStats: state.baselineScanSummary.languageStats,
+        languageStats: activeScanSummary.languageStats,
       };
       reporter.emit({
         type: "phase-skip",

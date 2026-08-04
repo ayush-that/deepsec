@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
+import { atomicWriteFile } from "../atomic-file.js";
 import { loadEnvFile, parseEnvFile, updateEnvFile } from "../env-file.js";
 import { type SetupAction, SetupProtocolError } from "../setup/protocol.js";
 
@@ -108,12 +109,8 @@ export async function readWorkspaceLink(workspaceDir: string): Promise<VercelPro
 }
 
 async function writeWorkspaceLink(workspaceDir: string, link: VercelProjectLink): Promise<void> {
-  const dir = join(workspacePath(workspaceDir), ".vercel");
-  const file = join(dir, "project.json");
-  const temp = `${file}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`;
-  await mkdir(dir, { recursive: true });
-  await writeFile(temp, `${JSON.stringify(link, null, 2)}\n`, { mode: 0o600 });
-  await rename(temp, file);
+  const file = join(workspacePath(workspaceDir), ".vercel", "project.json");
+  await atomicWriteFile(file, `${JSON.stringify(link, null, 2)}\n`, { mode: 0o600 });
 }
 
 export const runPinnedVercelCli: RunVercelCli = async (args, cwd) =>
@@ -166,16 +163,69 @@ function parseJsonOutput(result: CommandResult, label: string): Record<string, a
   return JSON.parse(result.stdout.slice(start, end + 1));
 }
 
+interface VercelTeam {
+  id: string;
+  slug: string;
+  name: string;
+  current?: boolean;
+}
+
+interface ListedVercelProject {
+  id: string;
+  name: string;
+}
+
+async function listTeams(runCli: RunVercelCli, cwd: string): Promise<VercelTeam[]> {
+  const teams = parseJsonOutput(
+    await runCli(["teams", "list", "--format=json", "--limit", "100"], cwd),
+    "vercel teams list",
+  ).teams;
+  if (!Array.isArray(teams) || teams.length === 0) throw new Error("No Vercel teams are available");
+  return teams as VercelTeam[];
+}
+
+async function listProjects(
+  runCli: RunVercelCli,
+  cwd: string,
+  teamSlug: string,
+): Promise<ListedVercelProject[]> {
+  const value = parseJsonOutput(
+    await runCli(["project", "list", "--format=json", "--limit", "100", "--scope", teamSlug], cwd),
+    "vercel project list",
+  );
+  return (value.projects ?? []) as ListedVercelProject[];
+}
+
+async function addProject(
+  runCli: RunVercelCli,
+  cwd: string,
+  teamSlug: string,
+  projectName: string,
+): Promise<void> {
+  await requireSuccess(
+    await runCli(["project", "add", projectName, "--scope", teamSlug], cwd),
+    "vercel project add",
+  );
+}
+
+async function linkProject(
+  runCli: RunVercelCli,
+  cwd: string,
+  teamSlug: string,
+  projectName: string,
+): Promise<void> {
+  await requireSuccess(
+    await runCli(["link", "--yes", "--team", teamSlug, "--project", projectName], cwd),
+    "vercel link",
+  );
+}
+
 async function promptForProjectLink(workspaceDir: string, runCli: RunVercelCli): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     await requireSuccess(await runCli(["link", "--yes"], workspaceDir), "vercel link");
     return;
   }
-  const teams = parseJsonOutput(
-    await runCli(["teams", "list", "--format=json", "--limit", "100"], workspaceDir),
-    "vercel teams list",
-  ).teams as Array<{ id: string; slug: string; name: string; current?: boolean }>;
-  if (!Array.isArray(teams) || teams.length === 0) throw new Error("No Vercel teams are available");
+  const teams = await listTeams(runCli, workspaceDir);
   const currentIndex = Math.max(
     0,
     teams.findIndex((team) => team.current),
@@ -194,14 +244,7 @@ async function promptForProjectLink(workspaceDir: string, runCli: RunVercelCli):
     const team = teams[teamIndex];
     if (!team) throw new Error("Invalid Vercel team selection");
 
-    const projectsValue = parseJsonOutput(
-      await runCli(
-        ["project", "list", "--format=json", "--limit", "100", "--scope", team.slug],
-        workspaceDir,
-      ),
-      "vercel project list",
-    );
-    const projects = (projectsValue.projects ?? []) as Array<{ id: string; name: string }>;
+    const projects = await listProjects(runCli, workspaceDir, team.slug);
     console.log("\n  1. Create a dedicated Deepsec project (recommended)");
     for (const [index, project] of projects.entries()) {
       console.log(`  ${index + 2}. ${project.name}`);
@@ -213,19 +256,13 @@ async function promptForProjectLink(workspaceDir: string, runCli: RunVercelCli):
       const defaultName = `deepsec-${Math.random().toString(36).slice(2, 6)}`;
       const nameAnswer = await prompt.question(`Project name [${defaultName}]: `);
       projectName = nameAnswer.trim() || defaultName;
-      await requireSuccess(
-        await runCli(["project", "add", projectName, "--scope", team.slug], workspaceDir),
-        "vercel project add",
-      );
+      await addProject(runCli, workspaceDir, team.slug, projectName);
     } else {
       const project = projects[projectIndex - 1];
       if (!project) throw new Error("Invalid Vercel project selection");
       projectName = project.name;
     }
-    await requireSuccess(
-      await runCli(["link", "--yes", "--team", team.slug, "--project", projectName], workspaceDir),
-      "vercel link",
-    );
+    await linkProject(runCli, workspaceDir, team.slug, projectName);
   } finally {
     prompt.close();
   }
@@ -353,10 +390,7 @@ export async function ensureVercelLink(
       };
     }
 
-    const teams = parseJsonOutput(
-      await runCli(["teams", "list", "--format=json", "--limit", "100"], workspaceDir),
-      "vercel teams list",
-    ).teams as Array<{ id: string; slug: string; name: string; current?: boolean }>;
+    const teams = await listTeams(runCli, workspaceDir);
     const requestedTeam = explicitTeamId
       ? teams.find((team) => team.id === explicitTeamId || team.slug === explicitTeamId)
       : undefined;
@@ -401,34 +435,16 @@ export async function ensureVercelLink(
 
     const projectName = options.projectName;
     if (!projectName) throw new Error("Headless project creation requires a deterministic name");
-    const projects = (parseJsonOutput(
-      await runCli(
-        ["project", "list", "--format=json", "--limit", "100", "--scope", team.slug],
-        workspaceDir,
-      ),
-      "vercel project list",
-    ).projects ?? []) as Array<{ id: string; name: string }>;
+    const projects = await listProjects(runCli, workspaceDir, team.slug);
     let project = projects.find((candidate) => candidate.name === projectName);
     if (!project) {
-      await requireSuccess(
-        await runCli(["project", "add", projectName, "--scope", team.slug], workspaceDir),
-        "vercel project add",
-      );
-      const refreshed = (parseJsonOutput(
-        await runCli(
-          ["project", "list", "--format=json", "--limit", "100", "--scope", team.slug],
-          workspaceDir,
-        ),
-        "vercel project list",
-      ).projects ?? []) as Array<{ id: string; name: string }>;
+      await addProject(runCli, workspaceDir, team.slug, projectName);
+      const refreshed = await listProjects(runCli, workspaceDir, team.slug);
       project = refreshed.find((candidate) => candidate.name === projectName);
     }
     if (!project)
       throw new Error(`Vercel project ${projectName} was created but could not be found`);
-    await requireSuccess(
-      await runCli(["link", "--yes", "--team", team.slug, "--project", projectName], workspaceDir),
-      "vercel link",
-    );
+    await linkProject(runCli, workspaceDir, team.slug, projectName);
     await pullOidcToken(workspaceDir, runCli, env);
     const link = (await readWorkspaceLink(workspaceDir)) ?? {
       orgId: team.id,

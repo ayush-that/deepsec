@@ -1,5 +1,6 @@
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+import { parse as parseDotenv } from "dotenv";
+import { atomicWriteFile } from "./atomic-file.js";
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -8,29 +9,9 @@ function serializeEnvValue(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
 }
 
-/** Parse the small dotenv subset needed to reload credentials after setup. */
+/** Parse credentials with the same dotenv dialect used at CLI startup. */
 export function parseEnvFile(contents: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const line of contents.split(/\r?\n/)) {
-    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
-    if (!match) continue;
-    let value = match[2];
-    if (
-      value.length >= 2 &&
-      ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'")))
-    ) {
-      const quote = value[0];
-      value = value.slice(1, -1);
-      if (quote === '"') {
-        value = value.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-      }
-    } else {
-      value = value.replace(/\s+#.*$/, "");
-    }
-    result[match[1]] = value;
-  }
-  return result;
+  return parseDotenv(contents);
 }
 
 /**
@@ -71,19 +52,7 @@ export async function updateEnvFile(
     next += newline;
   }
 
-  await mkdir(dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`;
-  try {
-    await writeFile(tempPath, next, { encoding: "utf8", mode: 0o600 });
-    await chmod(tempPath, 0o600);
-    await rename(tempPath, filePath);
-  } catch (error) {
-    try {
-      const { unlink } = await import("node:fs/promises");
-      await unlink(tempPath);
-    } catch {}
-    throw error;
-  }
+  await atomicWriteFile(filePath, next, { mode: 0o600 });
 }
 
 export async function loadEnvFile(

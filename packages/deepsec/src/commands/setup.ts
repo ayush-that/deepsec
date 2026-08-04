@@ -8,6 +8,7 @@ import type { SupportedPackageManager } from "../setup/install.js";
 import { shouldUseHeadlessMode } from "../setup/interaction.js";
 import { acquireSetupLock } from "../setup/lock.js";
 import { type ModelRouteCliOptions, modelRouteFromCli } from "../setup/options.js";
+import { deterministicVercelProjectName } from "../setup/project-name.js";
 import {
   parseSetupOutputMode,
   type SetupOutputMode,
@@ -137,8 +138,7 @@ export async function setupCommand(options: SetupCommandOptions): Promise<void> 
       vercelProjectId: options.vercelProjectId,
       allowProjectCreate: options.yes,
       vercelProjectName:
-        options.vercelProjectName ??
-        `deepsec-${projectId.toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`,
+        options.vercelProjectName ?? deterministicVercelProjectName(projectId, projectRoot),
       concurrency: options.concurrency,
       through: options.through,
       maxCostUsd: options.maxCostUsd,

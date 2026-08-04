@@ -1,4 +1,5 @@
 import { getConfig } from "@deepsec/core";
+import { defaultCredentialHeaderScheme, type ModelRoute } from "./auth/model-route.js";
 
 const THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 
@@ -10,6 +11,7 @@ interface AgentRuntimeOpts {
   aiBaseUrl?: string;
   aiApiKeyEnv?: string;
   aiHeader?: string[];
+  modelRoute?: ModelRoute;
 }
 
 export function collectRepeatable(value: string, previous: string[] = []): string[] {
@@ -41,8 +43,12 @@ function providerFromModel(model: string | undefined): string | undefined {
 
 export function buildAgentConfig(opts: AgentRuntimeOpts): Record<string, unknown> {
   const aiHeaders = parseAiHeaders(opts.aiHeader);
-  const hasProviderOverride = Boolean(opts.aiBaseUrl || opts.aiApiKeyEnv || aiHeaders);
-  const effectiveProvider = opts.aiProvider ?? providerFromModel(opts.model);
+  const customRoute = opts.modelRoute?.mode === "custom" ? opts.modelRoute : undefined;
+  const aiBaseUrl = opts.aiBaseUrl ?? customRoute?.baseUrl;
+  const aiApiKeyEnv = opts.aiApiKeyEnv ?? customRoute?.apiKeyEnv;
+  const hasProviderOverride = Boolean(aiBaseUrl || aiApiKeyEnv || aiHeaders);
+  const effectiveProvider =
+    opts.aiProvider ?? customRoute?.provider ?? providerFromModel(opts.model);
   if (hasProviderOverride && !effectiveProvider) {
     throw new Error(
       `Pi provider override flags require --ai-provider or a provider/model --model value.`,
@@ -65,8 +71,19 @@ export function buildAgentConfig(opts: AgentRuntimeOpts): Record<string, unknown
     config.reasoningEffort = thinkingLevel;
   }
   if (opts.aiProvider || hasProviderOverride) config.aiProvider = effectiveProvider;
-  if (opts.aiBaseUrl) config.aiBaseUrl = opts.aiBaseUrl;
-  if (opts.aiApiKeyEnv) config.aiApiKeyEnv = opts.aiApiKeyEnv;
+  if (aiBaseUrl) config.aiBaseUrl = aiBaseUrl;
+  if (aiApiKeyEnv) config.aiApiKeyEnv = aiApiKeyEnv;
+  const credentialHeader =
+    customRoute?.credentialHeader ??
+    (customRoute?.authHeader
+      ? {
+          name: customRoute.authHeader,
+          scheme: customRoute.authScheme ?? defaultCredentialHeaderScheme(customRoute.authHeader),
+        }
+      : undefined);
+  if (credentialHeader) {
+    config.aiCredentialHeader = credentialHeader;
+  }
   if (aiHeaders) config.aiHeaders = aiHeaders;
   return config;
 }

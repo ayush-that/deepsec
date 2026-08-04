@@ -131,6 +131,14 @@ export function buildSandboxEnv(
 
   if (credentials.selected) {
     env[credentials.selected.placeholderEnv] = BROKERED_TOKEN_PLACEHOLDER;
+    // The broker's source env identifies the real host-side credential, but
+    // the SDKs construct themselves from their standard variables before the
+    // firewall gets a chance to replace the outbound header.
+    if (agentType === "codex") env.OPENAI_API_KEY = BROKERED_TOKEN_PLACEHOLDER;
+    if (agentType === "claude-agent-sdk") {
+      env.ANTHROPIC_AUTH_TOKEN = BROKERED_TOKEN_PLACEHOLDER;
+      env.ANTHROPIC_API_KEY = BROKERED_TOKEN_PLACEHOLDER;
+    }
   }
 
   // Decoy tokens. Real values stay on the orchestrator host; the firewall

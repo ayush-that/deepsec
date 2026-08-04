@@ -62,10 +62,10 @@ function parsePositiveNumber(value: string): number {
 }
 
 function parseDuration(value: string): number {
-  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h)?$/.exec(value);
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec(value);
   if (!match) throw new Error("Duration must look like 500ms, 30s, 10m, or 2h");
   const multipliers = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
-  return Number(match[1]) * multipliers[(match[2] as keyof typeof multipliers) ?? "ms"];
+  return Number(match[1]) * multipliers[match[2] as keyof typeof multipliers];
 }
 
 program

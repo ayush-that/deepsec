@@ -80,6 +80,7 @@ interface PiAgentConfig {
   aiBaseUrl?: string;
   aiApiKeyEnv?: string;
   aiHeaders?: Record<string, string>;
+  aiCredentialHeader?: { name: string; scheme: "bearer" | "raw" };
   thinkingLevel?: string;
 }
 
@@ -281,6 +282,10 @@ function readConfig(config: Record<string, unknown>): PiAgentConfig {
       config.aiHeaders && typeof config.aiHeaders === "object" && !Array.isArray(config.aiHeaders)
         ? (config.aiHeaders as Record<string, string>)
         : undefined,
+    aiCredentialHeader:
+      config.aiCredentialHeader && typeof config.aiCredentialHeader === "object"
+        ? (config.aiCredentialHeader as { name: string; scheme: "bearer" | "raw" })
+        : undefined,
     thinkingLevel: typeof config.thinkingLevel === "string" ? config.thinkingLevel : undefined,
   };
 }
@@ -367,7 +372,15 @@ export function configureProviderOverrides(registry: ModelRegistry, cfg: PiAgent
   if (!provider) return;
   const override: Parameters<ModelRegistry["registerProvider"]>[1] = {};
   if (cfg.aiBaseUrl) override.baseUrl = cfg.aiBaseUrl;
-  if (cfg.aiHeaders && Object.keys(cfg.aiHeaders).length > 0) override.headers = cfg.aiHeaders;
+  const headers = { ...(cfg.aiHeaders ?? {}) };
+  if (cfg.aiCredentialHeader && cfg.aiApiKeyEnv) {
+    const credential = process.env[cfg.aiApiKeyEnv];
+    if (credential) {
+      headers[cfg.aiCredentialHeader.name] =
+        cfg.aiCredentialHeader.scheme === "bearer" ? `Bearer ${credential}` : credential;
+    }
+  }
+  if (Object.keys(headers).length > 0) override.headers = headers;
   if (Object.keys(override).length > 0) {
     registry.registerProvider(provider, override);
   }

@@ -257,6 +257,12 @@ export default defineConfig({
     expect(result.stdout).not.toContain("Model access");
   });
 
+  it("rejects a bare --max-duration instead of treating it as milliseconds", () => {
+    const result = runBundle(["init", "--max-duration", "30"]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Duration must look like 500ms, 30s, 10m, or 2h");
+  });
+
   it("init --scaffold-only writes a workspace seeded with the first project", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-init-"));
     const workspace = path.join(tmp, "audits");
@@ -379,6 +385,27 @@ export default defineConfig({
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  it("repairs a truncated generated project registration with --force", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-init-repair-"));
+    const workspace = path.join(tmp, ".deepsec");
+    const targetRoot = path.join(tmp, "app");
+    fs.mkdirSync(targetRoot);
+    expect(runBundle(["init", workspace, targetRoot, "--scaffold-only"]).status).toBe(0);
+    const projectFile = path.join(workspace, "data", "app", "project.json");
+    fs.writeFileSync(projectFile, '{"projectId":');
+
+    const failed = runBundle(["init", workspace, targetRoot, "--scaffold-only"]);
+    expect(failed.status).toBe(1);
+    expect(failed.stderr).toContain("Rerun with --force to repair");
+
+    const repaired = runBundle(["init", workspace, targetRoot, "--scaffold-only", "--force"]);
+    expect(repaired.status, repaired.stderr).toBe(0);
+    expect(JSON.parse(fs.readFileSync(projectFile, "utf8"))).toMatchObject({
+      projectId: "app",
+      rootPath: fs.realpathSync(targetRoot),
+    });
   });
 
   it("init with no args defaults to .deepsec/ inside cwd, target = .", () => {

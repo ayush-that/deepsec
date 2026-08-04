@@ -49,6 +49,16 @@ describe("applyConfiguredModelRoute", () => {
     await expect(applyConfiguredModelRoute("codex", env)).resolves.toBeUndefined();
     expect(env).toEqual({});
   });
+
+  it("ignores a persisted route that is incompatible with the requested harness", async () => {
+    setLoadedConfig({
+      projects: [],
+      ai: { mode: "direct", provider: "openai", apiKeyEnv: "MY_OPENAI_KEY" },
+    });
+    const env = { MY_OPENAI_KEY: "secret" };
+    await expect(applyConfiguredModelRoute("claude-agent-sdk", env)).resolves.toBeUndefined();
+    expect(env).toEqual({ MY_OPENAI_KEY: "secret" });
+  });
 });
 
 describe("assertAgentCredential", () => {

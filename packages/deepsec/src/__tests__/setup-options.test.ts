@@ -41,4 +41,19 @@ describe("modelRouteFromCli", () => {
       credentialHeader: { name: "x-api-key", scheme: "raw" },
     });
   });
+
+  it("defaults authorization to bearer and other custom headers to raw", () => {
+    const base = {
+      modelAuth: "custom" as const,
+      aiProvider: "acme",
+      aiApiKeyEnv: "ACME_KEY",
+      aiBaseUrl: "https://models.example.test/v1",
+    };
+    expect(
+      modelRouteFromCli({ ...base, aiCredentialHeader: "authorization" }).credentialHeader,
+    ).toEqual({ name: "authorization", scheme: "bearer" });
+    expect(
+      modelRouteFromCli({ ...base, aiCredentialHeader: "x-api-key" }).credentialHeader,
+    ).toEqual({ name: "x-api-key", scheme: "raw" });
+  });
 });

@@ -71,6 +71,7 @@ describe("Pi model resolution", () => {
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_BASE_URL",
+    "ACME_MODEL_KEY",
   ] as const;
   const originalEnv = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
   const originalFetch = globalThis.fetch;
@@ -195,5 +196,20 @@ describe("Pi model resolution", () => {
     await resolvePiModelWithDynamicGateway(registry, "acme/nonexistent-model-1", {});
     const config = registry.getRegisteredProviderConfig("vercel-ai-gateway");
     expect(config?.headers?.["http-referer"]).toBe("https://deepsec.sh");
+  });
+
+  it("configures a persisted custom provider base URL and credential header", async () => {
+    process.env.ACME_MODEL_KEY = "secret";
+    const registry = await freshRegistry();
+    configureProviderOverrides(registry, {
+      aiProvider: "acme",
+      aiBaseUrl: "https://models.acme.test/v1",
+      aiApiKeyEnv: "ACME_MODEL_KEY",
+      aiCredentialHeader: { name: "x-api-key", scheme: "raw" },
+    });
+    expect(registry.getRegisteredProviderConfig("acme")).toMatchObject({
+      baseUrl: "https://models.acme.test/v1",
+      headers: { "x-api-key": "secret" },
+    });
   });
 });
