@@ -462,7 +462,7 @@ export async function ensureVercelLink(
   let method: PlatformLinkResult["method"] = "existing-link";
   if (!existing) {
     options.onLog?.(
-      "Vercel link reads the selected project's development environment; a dedicated empty Deepsec project is safest.",
+      "Now we're linking Deepsec to a Vercel project for AI Gateway access. Because the link reads the project's development environment, a dedicated empty Deepsec project is safest.",
     );
     const whoami = await runCli(["whoami"], workspaceDir);
     if (whoami.exitCode !== 0) {
