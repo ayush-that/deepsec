@@ -1,6 +1,6 @@
 {
   "name": "deepsec",
-  "version": "2.2.9",
+  "version": "2.3.1",
   "description": "AI-powered vulnerability scanner for any codebase",
   "license": "Apache-2.0",
   "repository": {
@@ -39,14 +39,17 @@
     "@openai/codex-sdk": "^0.145.0",
     "@vercel/oidc": "^3.4.0",
     "@vercel/sandbox": "^1.9.0",
+    "ink": "^7.1.1",
     "jiti": "^2.4.0",
     "minimatch": "^10.0.0",
+    "react": "^19.2.8",
     "tar": "^7.5.20"
   },
   "devDependencies": {
     "@deepsec/core": "workspace:*",
     "@deepsec/processor": "workspace:*",
     "@deepsec/scanner": "workspace:*",
+    "@types/react": "^19.2.18",
     "commander": "^13.0.0",
     "dotenv": "^16.4.0",
     "dts-bundle-generator": "^9.5.1",
