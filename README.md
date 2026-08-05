@@ -12,7 +12,7 @@ analyzed and only investigating the rest.
 
 ## Get started
 
-You need Node.js 22+. From the root of the repository you want to scan:
+From the root of the repository you want to scan:
 
 ```bash
 npx deepsec init
