@@ -12,49 +12,46 @@ analyzed and only investigating the rest.
 
 ## Get started
 
-Navigate to the root of the repository that you want to scan, then:
+You need Node.js 22+. From the root of the repository you want to scan:
 
 ```bash
 npx deepsec init
 ```
 
-That one resumable command creates the isolated `.deepsec/` workspace,
-installs its pnpm/npm dependencies, links it to a Vercel project with
-Sandbox access, offers benchmark-backed model/reasoning combinations (or a
-custom model slug), verifies the selected model route, builds `INFO.md` and
-an attack-surface inventory, scans, adds narrowly validated custom
-matchers when coverage needs them, scans again, and starts AI processing.
-Re-run the same command—or `cd .deepsec && pnpm deepsec setup`—to resume;
-completed phases are reconciled and skipped.
+The command guides you through everything. It asks you to pick an AI model
+(with benchmark scores and prices to compare) and how to pay for model
+usage — your own OpenAI/Anthropic API key, or Vercel AI Gateway — and then
+works unattended: it studies your codebase, scans it, and runs the AI
+review. The only thing it adds to your repository is a `.deepsec/` folder
+where all of its state and findings live.
 
-Agents and CI clients can inspect the setup without mutations and then run it
-with a stable machine protocol:
+If the run is interrupted for any reason — Ctrl-C, lost connection, a
+spending limit — run `npx deepsec init` again and it continues where it
+left off. To cap what a run may spend or how long it may take:
 
 ```bash
-npx deepsec init --plan --output json
-npx deepsec init --yes --model-profile value --output jsonl
+npx deepsec init --max-cost-usd 100 --max-duration 2h
 ```
 
-Headless mode is automatic without a TTY. Missing login or ambiguous scope is
-returned as structured `needs_input` with user actions and resume arguments;
-cost/duration bounds and `--through coverage` stop at resumable checkpoints.
-
-Use `npx deepsec init --scaffold-only` for the old manual workflow. For a
-user-owned model key, select `--model-auth direct` with
-`--ai-provider`, `--ai-api-key-env`, and optionally `--ai-base-url`.
-
-After setup, daily commands run from `.deepsec/`:
+When the scan finishes, get a readable report:
 
 ```bash
-pnpm deepsec scan
-pnpm deepsec process    
-pnpm deepsec revalidate # optional, cuts FP rate
+cd .deepsec
 pnpm deepsec export --format md-dir --out ./findings
 ```
 
-Setup evaluates scanner coverage before processing and safely generates
-declarative matchers for concrete gaps. For richer negative/contextual rules,
-see [generated and hand-authored matchers](https://github.com/vercel-labs/deepsec/blob/main/docs/writing-matchers.md).
+For later scans, work from inside `.deepsec/`:
+
+```bash
+pnpm deepsec scan        # fast pattern scan, free
+pnpm deepsec process     # AI review of new candidates
+pnpm deepsec revalidate  # optional, cuts false-positive rate
+pnpm deepsec export --format md-dir --out ./findings
+```
+
+The [getting started guide](https://github.com/vercel-labs/deepsec/blob/main/docs/getting-started.md)
+covers all of this in more detail, including using your own OpenAI or
+Anthropic API key and running from CI or a coding agent.
 
 ## Docs
 
@@ -63,7 +60,7 @@ installed CLI at `.deepsec/node_modules/deepsec/SKILL.md` and
 `.deepsec/node_modules/deepsec/dist/docs/`. Setup errors expose these as
 absolute machine-readable paths.
 
-- [Getting started](https://github.com/vercel-labs/deepsec/blob/main/docs/getting-started.md) — one-shot setup and resume
+- [Getting started](https://github.com/vercel-labs/deepsec/blob/main/docs/getting-started.md) — set up and run your first scan
 - [Reviewing changes](https://github.com/vercel-labs/deepsec/blob/main/docs/reviewing-changes.md) — `process --diff` and CI gating
 - [Supported technology](https://github.com/vercel-labs/deepsec/blob/main/docs/supported-tech.md) — built-in coverage
 - [Generated and hand-authored matchers](https://github.com/vercel-labs/deepsec/blob/main/docs/writing-matchers.md)
@@ -79,17 +76,15 @@ absolute machine-readable paths.
 
 ## AI provider
 
-Initialization separates the Vercel project link from the model route. The
-workspace is always linked with Sandbox-capable credentials in scope; the model can use Vercel
-AI Gateway (default), your own OpenAI/Anthropic key, or a custom Pi provider.
-Only the environment-variable name and routing metadata are persisted.
-
-Interactive setup explains the isolated link, lets you create a dedicated
-Deepsec project or choose an existing one, and pulls linked-project OIDC
-automatically. It does not create a billable Sandbox during onboarding. For a long-lived
-Gateway key, set `AI_GATEWAY_API_KEY`; for BYOK, use `--model-auth direct`
-with `--ai-api-key-env`. See [project link, Sandbox, and model
-credentials](https://github.com/vercel-labs/deepsec/blob/main/docs/vercel-setup.md).
+By default, deepsec routes model calls through Vercel AI Gateway, which
+gives access to every major model without provider-specific keys. You can
+instead bring your own key — OpenAI, Anthropic, or a custom HTTPS
+provider — by passing `--model-auth direct` with `--ai-provider` and
+`--ai-api-key-env` to `init`; no Vercel account is needed in that mode.
+Deepsec only ever stores the *name* of the environment variable holding
+your key, never the key itself. See
+[project link and credentials](https://github.com/vercel-labs/deepsec/blob/main/docs/vercel-setup.md)
+for the full reference.
 
 If a `process` or `revalidate` run halts because the upstream credential
 ran out of quota or credits, deepsec stops gracefully and tells you
@@ -104,9 +99,10 @@ Large monorepos can fan work across [Vercel Sandbox](https://vercel.com/docs/ver
 pnpm deepsec sandbox process --project-id my-app --sandboxes 10 --concurrency 4
 ```
 
-The normal initializer already verified the exact workspace link. The local
-working tree is tarballed and uploaded; `.git` is excluded. Model credentials
-remain host-side and are injected only at the selected egress host.
+Setup already verified the Vercel connection, so this needs no extra
+onboarding. The local working tree is tarballed and uploaded; `.git` is
+excluded. Model credentials remain host-side and are injected only at the
+selected egress host.
 
 ## Security model of deepsec itself
 
