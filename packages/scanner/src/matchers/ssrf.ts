@@ -24,6 +24,10 @@ export const ssrfMatcher: MatcherPlugin = {
     "https.request(`https://api/${req.body.host}`);",
     `page.goto(req.body.url);`,
     `browser.goto(params.target);`,
+    `page.setContent(req.body.html);`,
+    `fetch(headers().get('x-target'));`,
+    `fetch(cookies().get('redirect')?.value);`,
+    `axios.post(formData.get('url'));`,
     `new URL(req.query.target);`,
     `new URL(nextUrl.searchParams.get('href'));`,
     "fetch(`${userBase}/items`);",
@@ -56,7 +60,9 @@ export const ssrfMatcher: MatcherPlugin = {
           label: "http(s).get/request with request-derived URL",
         },
         {
-          regex: new RegExp(String.raw`\b(page|browser)\.(goto|setContent)\s*\(\s*${USER_INPUT_TOKEN}`),
+          regex: new RegExp(
+            String.raw`\b(page|browser)\.(goto|setContent)\s*\(\s*${USER_INPUT_TOKEN}`,
+          ),
           label: "browser navigation with request-derived URL",
         },
         { regex: /https?\.request\s*\(\s*`[^`]*\$\{/, label: "http.request with interpolated URL" },
@@ -65,9 +71,8 @@ export const ssrfMatcher: MatcherPlugin = {
           label: "new URL from request data",
         },
         {
-          regex: new RegExp(
-            String.raw`(?:const|let|var)\s+\w*[uU]rl\w*\s*=\s*[^;\n]*\b(?:req|request|params|query|body|searchParams|nextUrl|input)\b`,
-          ),
+          regex:
+            /(?:const|let|var)\s+\w*[uU]rl\w*\s*=\s*[^;\n]*\b(?:req|request|params|query|body|searchParams|nextUrl|input)\b/,
           label: "URL-named variable assigned from request data",
         },
       ],
@@ -80,7 +85,10 @@ export const ssrfMatcher: MatcherPlugin = {
     const lines = content.split("\n");
     const constantBaseUrls = /VERCEL_API_URL|API_BASE|API_URL|INTERNAL_URL|process\.env\.\w+_URL/;
     const stringBuiltUrlRules = [
-      { regex: /fetch\s*\(\s*`[^`]*\$\{/, label: "fetch with interpolated URL (non-constant base)" },
+      {
+        regex: /fetch\s*\(\s*`[^`]*\$\{/,
+        label: "fetch with interpolated URL (non-constant base)",
+      },
       { regex: /https?:\/\/[^`]*\$\{/, label: "string-built URL via template interpolation" },
       { regex: /["']https?:\/\/["']\s*\+/, label: "string-built URL via concatenation" },
     ];
