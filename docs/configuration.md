@@ -31,7 +31,7 @@ see [`samples/webapp/deepsec.config.ts`](https://github.com/vercel-labs/deepsec/
 | `projects` | `ProjectDeclaration[]` | The codebases deepsec knows about. |
 | `plugins` | `DeepsecPlugin[]` | Loaded in order; later plugins override single-slot capabilities. |
 | `matchers` | `{ only?: string[]; exclude?: string[] }` | Filter the matcher set used by `scan`. |
-| `defaultAgent` | `string` | Default `--agent` value (`codex`, `claude`, or `pi`). See [models.md](models.md). |
+| `defaultAgent` | `string` | Default `--agent` value (`codex`, `claude`, or `pi`). See [models](models.md). |
 | `defaultModel` | `string` | Default `--model` value selected during setup. |
 | `defaultThinkingLevel` | `string` | Default reasoning effort (`minimal` through `xhigh`) selected during setup. |
 | `ai` | `ModelRoute` | Non-secret model credential route selected and verified by setup. |
@@ -88,7 +88,7 @@ If `infoMarkdown` isn't set in the config, deepsec looks for
 context (what the codebase does, the auth shape, the threat model,
 known false-positive sources) is the right length. One-shot setup writes and
 validates this file automatically. See
-[getting-started.md](getting-started.md) for its required sections and resume
+[getting-started](getting-started.md) for its required sections and resume
 behavior.
 
 ## Generated matchers
@@ -100,7 +100,7 @@ breadth validation. Keep the import/plugin entry in config and commit the
 generated file after review.
 
 Hand-authored plugins remain additive and can live beside the generated
-plugin. See [writing-matchers.md](writing-matchers.md).
+plugin. See [writing-matchers](writing-matchers.md).
 
 ## Matcher filtering
 

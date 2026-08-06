@@ -56,7 +56,7 @@ Optional. Read by `scan` and the AI agents.
 
 Free-form markdown injected into the AI prompt for `process`,
 `triage`, and `revalidate`. See
-[getting-started.md](getting-started.md) for the automatic repository-analysis
+[getting-started](getting-started.md) for the automatic repository-analysis
 phase and the manual scaffold fallback.
 
 ## `setup/setup-state.json` — SetupState
@@ -172,7 +172,7 @@ deleted.
 | `numTurns` | `number?` | Conversation turn count. |
 | `costUsd` | `number?` | Estimated USD cost. |
 | `usage` | `{ inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens }?` | Token accounting. |
-| `refusal` | `RefusalReport?` | See [models.md](models.md#refusals-are-not-a-large-problem). |
+| `refusal` | `RefusalReport?` | See [models](models.md#refusals-are-not-a-large-problem). |
 | `codexStderr` | `string?` | Captured codex stderr when an investigation produced 0 output tokens (forensic only). |
 | `reinvestigateMarker` | `number?` | Wave marker from `--reinvestigate <N>`. |
 

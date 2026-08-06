@@ -46,7 +46,7 @@ The built-in backends work with Vercel AI Gateway through the linked
 workspace's OIDC credential. The model credential route is independent of the
 Vercel/Sandbox project link and is persisted as non-secret `ai` config. Direct
 OpenAI/Anthropic and custom Pi routes are documented in
-[vercel-setup.md](vercel-setup.md).
+[vercel-setup](vercel-setup.md).
 
 ## CLI selection
 

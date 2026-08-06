@@ -85,7 +85,7 @@ MY_ANTHROPIC_KEY=... npx deepsec init \
   --ai-provider anthropic --ai-api-key-env MY_ANTHROPIC_KEY
 ```
 
-See [vercel-setup.md](vercel-setup.md) for route persistence, headless
+See [vercel-setup](vercel-setup.md) for route persistence, headless
 project credentials, and host-side Sandbox credential brokering.
 
 ## How accurate is it? What's the FP rate?
@@ -170,7 +170,7 @@ what `--reinvestigate` (process) and `--force` (revalidate) are for.
 
 ## How do I add a matcher for my codebase?
 
-See [docs/writing-matchers.md](writing-matchers.md). Short version: hand
+See [writing-matchers](writing-matchers.md). Short version: hand
 your `.deepsec/data/` and the target repo to your coding agent with the
 prompt in that doc — it'll spot entry-point coverage gaps the default
 matchers miss and write matchers tailored to your codebase.
