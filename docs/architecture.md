@@ -53,7 +53,7 @@ gitignored by the scaffold; `INFO.md` remains trackable. Each `FileRecord` is th
 for everything deepsec knows about a single source file: candidate
 matches, AI findings, analysis history, git committer info, ownership.
 Full schemas for every file under `data/` are documented in
-[data-layout.md](data-layout.md).
+[data-layout](data-layout.md).
 
 The merge model is additive: every stage adds to the FileRecord. A
 re-scan merges new candidates into the existing set; a re-process appends
@@ -177,7 +177,7 @@ from the active plugins, and stashes it on a module-level singleton
 (`getRegistry()`). All internal code consults the registry rather than
 hard-coding integrations.
 
-See [docs/plugins.md](plugins.md) for the full plugin authoring guide.
+See [plugins](plugins.md) for the full plugin authoring guide.
 
 ## Design decisions
 

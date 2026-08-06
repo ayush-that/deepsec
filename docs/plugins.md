@@ -55,7 +55,7 @@ e.g. `@my-org/plugin-internal-services`.
 ## Slot 1: matchers
 
 Most common. Same shape as a built-in matcher; see
-[writing-matchers.md](writing-matchers.md) for how to write one.
+[writing-matchers](writing-matchers.md) for how to write one.
 
 ```ts
 // my-plugin/src/matchers/internal-rpc.ts

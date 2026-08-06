@@ -107,7 +107,7 @@ MY_OPENAI_KEY=... npx deepsec init \
 For Anthropic, use `--agent claude --ai-provider anthropic`. Deepsec
 stores only the *name* of the environment variable, never the key itself —
 export the variable again for later commands, or put it in
-`.deepsec/.env.local`. See [vercel-setup.md](vercel-setup.md) for other
+`.deepsec/.env.local`. See [vercel-setup](vercel-setup.md) for other
 providers and the full credential reference.
 
 ## Two files worth a look
@@ -120,14 +120,14 @@ Setup writes two things you may want to review:
   findings.
 - `.deepsec/generated-matchers.ts` — extra scan patterns deepsec generated
   to cover gaps in your codebase. Review and commit this file. To go
-  further, see [writing-matchers.md](writing-matchers.md).
+  further, see [writing-matchers](writing-matchers.md).
 
 ## A note on trust
 
 Treat deepsec like a coding agent: during setup it reads your source code
 with an AI agent that authenticates to your model provider. Only run it on
 code you trust at that level. For scanning untrusted pull requests, use
-the guarded CI patterns in [reviewing-changes.md](reviewing-changes.md),
+the guarded CI patterns in [reviewing-changes](reviewing-changes.md),
 or run the work in isolated cloud sandboxes (this part does use a Vercel
 account, since the sandboxes run on Vercel):
 
@@ -185,10 +185,10 @@ everyday commands.
 
 ## Next
 
-- [configuration.md](configuration.md) — project, model route, and
+- [configuration](configuration.md) — project, model route, and
   environment configuration.
-- [writing-matchers.md](writing-matchers.md) — improving scan coverage
+- [writing-matchers](writing-matchers.md) — improving scan coverage
   with your own matchers.
-- [vercel-setup.md](vercel-setup.md) — credentials, CI setups, and
+- [vercel-setup](vercel-setup.md) — credentials, CI setups, and
   troubleshooting the Vercel connection.
-- [architecture.md](architecture.md) — how the pipeline works internally.
+- [architecture](architecture.md) — how the pipeline works internally.
