@@ -42,6 +42,21 @@ pnpm bundle             # esbuild → packages/deepsec/dist/{cli,config}.mjs
 pnpm test:bundle        # bundle e2e: runs the produced binary as a subprocess
 ```
 
+To manually exercise unpublished onboarding end to end, build once and run
+the bundle from a disposable target repository:
+
+```bash
+pnpm bundle
+cd /path/to/disposable-project
+node /path/to/deepsec/packages/deepsec/dist/cli.mjs init
+```
+
+When the bundle detects that it is running from a source checkout, the
+generated `.deepsec/package.json` automatically uses that checkout as its
+`deepsec` dependency. No pack, link, scaffold-only, or manifest editing step
+is required. Re-running the same command repairs workspaces created by older
+local bundles that pointed at the npm registry.
+
 All of build, test, lint, and knip must pass before a PR is mergeable.
 PRs that touch the publish surface (anything imported via `deepsec/config`)
 must also pass `pnpm test:bundle`.
