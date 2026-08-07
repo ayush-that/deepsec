@@ -40,7 +40,7 @@ npx deepsec init
 ```
 
 Deepsec remembers how far it got. Finished steps are skipped and the run
-continues where it left off — this is also how you resume after hitting a
+continues where it left off. This is also how you resume after hitting a
 cost limit, losing your connection, or pressing Ctrl-C.
 
 ## Limiting time and cost
@@ -87,7 +87,7 @@ pnpm deepsec revalidate   # re-check findings; cuts false positives
 pnpm deepsec export --format md-dir --out ./findings
 ```
 
-`scan` costs nothing — it's local pattern matching. `process` is the
+`scan` costs nothing (it's local pattern matching). `process` is the
 expensive AI stage. All of these resume cleanly if interrupted, and
 re-running them only looks at work that isn't done yet.
 
@@ -105,8 +105,8 @@ MY_OPENAI_KEY=... npx deepsec init \
 ```
 
 For Anthropic, use `--agent claude --ai-provider anthropic`. Deepsec
-stores only the *name* of the environment variable, never the key itself —
-export the variable again for later commands, or put it in
+stores only the *name* of the environment variable, never the key itself.
+Export the variable again for later commands, or put it in
 `.deepsec/.env.local`. See [vercel-setup](vercel-setup.md) for other
 providers and the full credential reference.
 
@@ -135,7 +135,7 @@ account, since the sandboxes run on Vercel):
 pnpm deepsec sandbox process --project-id my-app --sandboxes 10 --concurrency 4
 ```
 
-Sandboxes never see your real model credentials — the host machine keeps
+Sandboxes never see your real model credentials. The host machine keeps
 them and injects them only at the model provider's servers.
 
 ## Running from CI or an agent

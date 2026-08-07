@@ -13,10 +13,10 @@ Vercel project. That single link supplies the platform identity used for:
 
 There is no separate Sandbox onboarding step. Setup verifies that the exact
 workspace link has an OIDC or access-token credential usable by Sandbox, but
-does not create a billable Sandbox. Distributed execution remains optional;
-the first `sandbox` command performs the authoritative service operation.
+does not create a billable Sandbox. Distributed execution remains optional.
+The first `sandbox` command performs the authoritative service operation.
 
-The link lives at `.deepsec/.vercel/project.json`; credentials live in
+The link lives at `.deepsec/.vercel/project.json`. Credentials live in
 `.deepsec/.env.local` or the calling process. Both paths are gitignored.
 Because `vercel env pull` reads the linked project's development environment,
 a dedicated empty Deepsec project is the safest choice.
@@ -100,7 +100,7 @@ ai: { mode: "gateway", provider: "vercel" }
 ```
 
 Deepsec maps the Gateway credential to the environment expected by Codex,
-Claude, or Pi. Sandbox workers receive only a placeholder; the real bearer
+Claude, or Pi. Sandbox workers receive only a placeholder. The real bearer
 token is injected at the allowed Gateway host by the host-side broker.
 
 ### Your own OpenAI or Anthropic credential

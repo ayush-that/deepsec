@@ -88,7 +88,7 @@ pnpm deepsec process --project-id my-app --thinking-level high
 ```
 
 Accepted values: `minimal`, `low`, `medium`, `high`, `xhigh`. The
-default is `xhigh` — deepsec optimizes for finding hard bugs, not for
+default is `xhigh`. Deepsec optimizes for finding hard bugs, not for
 cost. Dial down for cheaper reinvestigation waves or quick smoke runs
 over large repos.
 
@@ -121,7 +121,7 @@ themselves in lower FP rate, even at higher per-call cost. Opus is the
 strongest of the Claude family at this kind of code reasoning.
 
 If cost matters more than precision (a 10k-file repo, a quick triaged
-starter list), drop to `claude-sonnet-4-6` — same prompt, ~3× cheaper,
+starter list), drop to `claude-sonnet-4-6`. Same prompt, ~3× cheaper,
 ~10–20% higher FP rate.
 
 ### `gpt-5.5` for the Codex backend
@@ -166,8 +166,8 @@ repeatable `--ai-header name=value` remain available as Pi runtime overrides.
 
 ### `claude-sonnet-4-6` for `triage`
 
-Triage buckets findings into P0/P1/P2/skip without re-reading the code
-— it just looks at the finding text. That's a cheap task; Opus is
+Triage buckets findings into P0/P1/P2/skip without re-reading the code.
+It just looks at the finding text. That's a cheap task; Opus is
 overkill. Sonnet keeps `triage` at ~1¢/finding.
 
 ## Refusals
