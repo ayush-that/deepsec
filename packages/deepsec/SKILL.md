@@ -1,5 +1,5 @@
 ---
-name: deepsec
+name: deepsec-docs
 description: Use deepsec (an AI-powered vulnerability scanner) — one-shot initialization, resumable setup, project/model credentials, scans, generated or hand-authored matchers, and plugins. Activates when the user asks how to initialize, scan, configure, resume, or extend deepsec.
 ---
 
@@ -29,13 +29,6 @@ clone, `<deepsec-clone>/docs/`:
 - `architecture.md` — pipeline internals
 - `data-layout.md` — `data/` schemas (FileRecord, RunMeta, …)
 - `faq.md` — cost, model choice, sandbox mode, FP rate
-
-## Worked example
-
-`node_modules/deepsec/dist/samples/webapp/` (or `<deepsec-clone>/samples/webapp/`)
-is a reference for richer hand-authored matchers. The normal initializer now
-creates `generated-matchers.ts` automatically; do not present the sample's
-manual plugin as the default first-run path.
 
 ## How to answer common questions
 
