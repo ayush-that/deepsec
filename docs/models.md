@@ -37,6 +37,10 @@ with an isolated `GROK_HOME` (auth mirrored, skills/plugins not loaded),
 by default (`DEEPSEC_GROK_SANDBOX` overrides; nested sandbox is off when
 `DEEPSEC_INSIDE_SANDBOX=1`).
 
+**Local only for now.** `deepsec sandbox … --agent grok` exits early: Vercel
+Sandbox does not yet install the Grok CLI or broker `XAI_API_KEY` into the
+microVM. Use local `process` / `revalidate` / `init` instead.
+
 Interactive one-shot setup recommends five benchmark-backed combinations:
 GPT-5.6 Sol, Claude Opus 5, Kimi K3, Grok 4.5, and the current DeepSeek entry.
 Deepsec fetches the latest score, reasoning level, harness, and total run cost
