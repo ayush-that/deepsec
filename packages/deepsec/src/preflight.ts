@@ -187,10 +187,6 @@ function hasLocalPiAgent(): boolean {
   return existsSync(join(piHome, "auth.json"));
 }
 
-/**
- * Grok Build: XAI_API_KEY, or a real auth.json from `grok login`.
- * `which grok` alone is not enough (logged-out CLI would pass preflight).
- */
 function hasLocalGrokAgent(): boolean {
   if (process.env.XAI_API_KEY) return true;
   const homes = [process.env.GROK_HOME, join(homedir(), ".grok")].filter(

@@ -74,8 +74,6 @@ export function modelRouteCompatibilityError(
   route: ModelRoute,
   agentType: string,
 ): string | undefined {
-  // Grok resolves its own XAI route inside resolveModelRoute; any stored
-  // gateway/custom config is ignored for this harness (not an error).
   if (isGrokAgent(agentType)) return undefined;
   if (route.mode === "custom" && agentType !== "pi") {
     return `Custom model routes require --agent pi (received ${agentType})`;
@@ -89,7 +87,6 @@ export function modelRouteCompatibilityError(
   return undefined;
 }
 
-/** Synthetic route for Grok Build (XAI_API_KEY or local grok login). */
 function resolveGrokModelRoute(env: NodeJS.ProcessEnv): ResolvedModelRoute {
   const credentialEnv = "XAI_API_KEY";
   const credential = env[credentialEnv] ?? "";
@@ -132,8 +129,6 @@ export async function resolveModelRoute(
   options: ResolveModelRouteOptions,
 ): Promise<ResolvedModelRoute> {
   const env = options.env ?? process.env;
-  // Grok Build authenticates via XAI_API_KEY or `grok login`, independent of
-  // the selected gateway/direct/custom route stored for other harnesses.
   if (isGrokAgent(options.agentType)) {
     return resolveGrokModelRoute(env);
   }
@@ -283,7 +278,6 @@ export async function verifyModelRouteWithFetch(
   route: ResolvedModelRoute,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  // Grok OAuth (`grok login`) has no API key to probe; skip HTTP verification.
   if (route.route.provider === "xai" && !route.credential) return;
 
   const endpoint = modelsEndpoint(route);

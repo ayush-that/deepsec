@@ -57,8 +57,6 @@ describe("Grok Build agent", () => {
   });
 
   it("makeIsolatedGrokHome creates a config and mirrors auth when available", () => {
-    // Seed a fake user auth so we exercise the mirror path even if the
-    // developer machine has no real grok login in this environment.
     const seed = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-grok-seed-"));
     homes.push(seed);
     fs.writeFileSync(path.join(seed, "auth.json"), JSON.stringify({ token: "test" }), {
@@ -71,7 +69,6 @@ describe("Grok Build agent", () => {
       homes.push(home);
       expect(fs.existsSync(path.join(home, "config.toml"))).toBe(true);
       expect(fs.existsSync(path.join(home, "auth.json"))).toBe(true);
-      // No skills / plugins directory copied in.
       expect(fs.existsSync(path.join(home, "skills"))).toBe(false);
     } finally {
       if (prev === undefined) delete process.env.GROK_HOME;

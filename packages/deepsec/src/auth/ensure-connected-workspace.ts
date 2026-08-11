@@ -133,7 +133,6 @@ export async function ensureConnectedWorkspace(
   assertSandboxCredential({ env });
   const resolvedRoutes: ResolvedModelRoute[] = [];
   for (const agentType of options.agentTypes) {
-    // Grok Build uses XAI_API_KEY / grok login; verify that path before route resolve.
     if (isGrokAgent(agentType)) {
       assertAgentCredential(agentType);
     }
@@ -157,7 +156,6 @@ export async function ensureConnectedWorkspace(
   );
   if (!reuseModel) {
     for (const resolved of resolvedRoutes) {
-      // Skip HTTP probe when Grok auth is OAuth-only (no API key).
       if (resolved.route.provider === "xai" && !resolved.credential) continue;
       await (deps.verifyModelRoute ?? verifyModelRouteWithFetch)(resolved);
     }
