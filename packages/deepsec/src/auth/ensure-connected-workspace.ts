@@ -1,9 +1,10 @@
 import { join } from "node:path";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { updateEnvFile } from "../env-file.js";
-import { assertSandboxCredential } from "../preflight.js";
+import { assertAgentCredential, assertSandboxCredential } from "../preflight.js";
 import {
   applyResolvedModelRoute,
+  isGrokAgent,
   type ModelRoute,
   type ModelRouteVerifier,
   type ResolvedModelRoute,
@@ -132,6 +133,10 @@ export async function ensureConnectedWorkspace(
   assertSandboxCredential({ env });
   const resolvedRoutes: ResolvedModelRoute[] = [];
   for (const agentType of options.agentTypes) {
+    // Grok Build uses XAI_API_KEY / grok login; verify that path before route resolve.
+    if (isGrokAgent(agentType)) {
+      assertAgentCredential(agentType);
+    }
     const resolved = await (deps.resolveRoute ?? resolveModelRoute)(options.modelRoute, {
       agentType,
       env,
@@ -152,6 +157,8 @@ export async function ensureConnectedWorkspace(
   );
   if (!reuseModel) {
     for (const resolved of resolvedRoutes) {
+      // Skip HTTP probe when Grok auth is OAuth-only (no API key).
+      if (resolved.route.provider === "xai" && !resolved.credential) continue;
       await (deps.verifyModelRoute ?? verifyModelRouteWithFetch)(resolved);
     }
   }

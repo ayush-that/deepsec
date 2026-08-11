@@ -148,6 +148,20 @@ export async function sandboxCommand(subcommand: string, opts: SandboxOpts) {
   const projectId = resolveProjectId(opts.projectId);
   const config = buildConfig(subcommand as SandboxSubcommand, projectId, opts);
 
+  // Grok Build is local-only until sandbox brokering installs the CLI and
+  // injects XAI credentials into the microVM network policy.
+  if (config.agentType === "grok" || config.agentType === "grok-build") {
+    console.error(
+      `Sandbox mode does not support --agent grok yet.\n` +
+        `\n` +
+        `  Use a local process instead:\n` +
+        `    pnpm deepsec process --project-id ${projectId} --agent grok\n` +
+        `\n` +
+        `  Or pick a sandbox-capable harness: --agent codex | claude | pi`,
+    );
+    process.exit(1);
+  }
+
   if (!config.aiApiKeyEnv && !config.aiBaseUrl) {
     const resolved = await applyConfiguredModelRoute(config.agentType ?? "codex");
     config.brokeredModelCredential = resolved?.broker;

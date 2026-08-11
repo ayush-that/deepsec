@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildGrokEnv, makeIsolatedGrokHome } from "../agents/grok-build.js";
+import { buildGrokEnv, makeIsolatedGrokHome, parseGrokStdout } from "../agents/grok-build.js";
 import { createDefaultAgentRegistry } from "../index.js";
 
 const homes: string[] = [];
@@ -45,6 +45,15 @@ describe("Grok Build agent", () => {
     } finally {
       process.env = prev;
     }
+  });
+
+  it("parseGrokStdout recovers a banner + nested JSON object", () => {
+    const raw = parseGrokStdout(
+      'note: starting\n{"text":"{\\"ok\\":true}","usage":{"input_tokens":12},"sessionId":"abc","num_turns":1}\n',
+    );
+    expect(raw.text).toBe('{"ok":true}');
+    expect(raw.sessionId).toBe("abc");
+    expect(raw.usage?.input_tokens).toBe(12);
   });
 
   it("makeIsolatedGrokHome creates a config and mirrors auth when available", () => {

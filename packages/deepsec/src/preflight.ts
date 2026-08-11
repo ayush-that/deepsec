@@ -188,8 +188,8 @@ function hasLocalPiAgent(): boolean {
 }
 
 /**
- * Grok Build: either XAI_API_KEY is set, or the user has run `grok login`
- * and we can see auth.json under GROK_HOME / ~/.grok.
+ * Grok Build: XAI_API_KEY, or a real auth.json from `grok login`.
+ * `which grok` alone is not enough (logged-out CLI would pass preflight).
  */
 function hasLocalGrokAgent(): boolean {
   if (process.env.XAI_API_KEY) return true;
@@ -199,8 +199,7 @@ function hasLocalGrokAgent(): boolean {
   for (const home of homes) {
     if (existsSync(join(home, "auth.json"))) return true;
   }
-  // Binary on PATH is a soft signal; the CLI errors clearly if not logged in.
-  return whichSync("grok");
+  return false;
 }
 
 function isGrok(agentType: string | undefined): boolean {
