@@ -13,3 +13,6 @@ linear-*
 plans/
 .pnpm-store/
 .env*
+
+# local review notes
+.review-grok-agent.md
