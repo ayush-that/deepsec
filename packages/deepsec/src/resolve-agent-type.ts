@@ -11,7 +11,6 @@ import { getConfig } from "@deepsec/core";
 export function resolveAgentType(provided: string | undefined): string {
   const resolved = provided ?? getConfig()?.defaultAgent ?? "codex";
   if (resolved === "claude") return "claude-agent-sdk";
-  // Accept both short and long forms for the Grok Build harness.
   if (resolved === "grok-build") return "grok";
   return resolved;
 }

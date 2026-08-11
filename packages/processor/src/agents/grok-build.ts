@@ -39,18 +39,11 @@ import type {
   SetupTaskParams,
 } from "./types.js";
 
-/**
- * Grok Build coding-agent backend: headless `grok -p` with a restricted
- * tool allowlist. Auth is XAI_API_KEY or mirrored `~/.grok/auth.json`.
- */
-
 const DEFAULT_MODEL = "grok-4.5";
 const DEFAULT_THINKING_LEVEL = "xhigh";
 
-// Internal Grok tool ids (not Claude's Read/Grep names).
 const INVESTIGATE_TOOLS = "read_file,grep,list_dir,run_terminal_cmd";
 const SETUP_TOOLS = "read_file,grep,list_dir";
-// Follow-ups (JSON repair / refusal) should not re-open the tool loop.
 const TOOLLESS = "read_file";
 
 const GROK_ENV_ALLOWLIST = new Set<string>([
@@ -117,7 +110,6 @@ interface GrokRunOptions {
   signal?: AbortSignal;
   onProgress?: (progress: AgentProgress) => void;
   grokHome?: string;
-  /** Keep GROK_HOME after the run so --resume can find the session. */
   keepHome?: boolean;
 }
 
@@ -146,10 +138,6 @@ function resolveGrokBinary(): string {
   return "grok";
 }
 
-/**
- * Minimal GROK_HOME without the operator's skills/MCP plugins (those
- * inflate the system prompt). Mirrors auth.json when present.
- */
 export function makeIsolatedGrokHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-grok-home-"));
   fs.writeFileSync(
@@ -178,7 +166,6 @@ export function makeIsolatedGrokHome(): string {
   return home;
 }
 
-/** Exported for tests. */
 export function buildGrokEnv(grokHome: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
@@ -232,7 +219,6 @@ function extractJsonObject(text: string): string | undefined {
   return undefined;
 }
 
-/** Exported for tests. */
 export function parseGrokStdout(stdout: string): GrokJsonResult {
   const trimmed = stdout.trim();
   if (!trimmed) throw new Error("Grok produced empty stdout");
@@ -264,7 +250,6 @@ function metaFromGrokJson(raw: GrokJsonResult): Partial<BatchMeta> {
   return meta;
 }
 
-/** One headless `grok -p` turn. Returns final JSON text + spend meta. */
 export async function runGrokHeadless(opts: GrokRunOptions): Promise<GrokRunResult> {
   const bin = resolveGrokBinary();
   const grokHome = opts.grokHome ?? makeIsolatedGrokHome();
@@ -335,7 +320,6 @@ export async function runGrokHeadless(opts: GrokRunOptions): Promise<GrokRunResu
       const quota = classifyQuotaError(errText);
       if (quota) throw new QuotaExhaustedError(quota, errText);
 
-      // Prefer structured JSON error on stdout when present.
       let structuredMsg: string | undefined;
       try {
         const errObj = parseGrokStdout(stdout);
@@ -343,7 +327,7 @@ export async function runGrokHeadless(opts: GrokRunOptions): Promise<GrokRunResu
           structuredMsg = errObj.message ?? errText;
         }
       } catch {
-        // stdout was not JSON; use raw errText
+        // ignore
       }
       const msg = structuredMsg ?? errText;
       const q = classifyQuotaError(msg);

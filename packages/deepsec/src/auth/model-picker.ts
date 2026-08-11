@@ -139,7 +139,6 @@ function strongest(results: BenchmarkResult[], modelId: string): BenchmarkResult
 }
 
 function configuredModel(result: BenchmarkResult): string {
-  // Pi needs the provider/model gateway id. Grok Build takes the bare model id.
   if (result.harness === "pi") return result.modelId;
   if (result.harness === "grok") {
     return result.modelId.startsWith("xai/")
@@ -177,8 +176,6 @@ function canonicalHarness(value: string | undefined): ModelHarness | undefined {
 }
 
 function compatibleHarness(route: ModelRoute, requested?: string): ModelHarness | undefined {
-  // Grok Build authenticates via XAI_API_KEY / grok login, independent of
-  // the Vercel AI Gateway model route. Prefer an explicit grok request.
   const requestedHarness = canonicalHarness(requested);
   if (requestedHarness === "grok") return "grok";
   if (route.mode === "direct") {
@@ -283,9 +280,6 @@ export async function promptForModelSelection(options: {
   const benchmark = await fetchBenchmarkResults(options.fetchImpl);
   const requiredHarness = compatibleHarness(options.route, options.agent);
   const recommendations = buildRecommendedModelChoices(benchmark.results);
-  // DeepSecBench currently scores Grok models under the Pi harness (AI
-  // Gateway). When the operator asked for Grok Build, remap those rows so
-  // they still appear with the native harness + bare model id.
   const choices = recommendations
     .map((choice) => {
       if (
