@@ -10,7 +10,32 @@ deepsec talks to LLMs through interchangeable agent backends:
 | `codex` (default)           | `gpt-5.5`             | `process`, `revalidate`      |
 | `claude`                    | `claude-opus-4-8`     | `process`, `revalidate`      |
 | `pi`                        | `zai/glm-5.2`        | `process`, `revalidate` |
+| `grok`                      | `grok-4.5`            | `process`, `revalidate`, setup |
 | `claude` (triage)           | `claude-sonnet-4-6`   | `triage` (Claude-only)       |
+
+### Grok Build (`--agent grok`)
+
+Uses the local [Grok Build](https://grok.com) CLI (`grok`) in headless mode
+(`grok -p … --output-format json`). Auth is independent of Vercel AI Gateway:
+
+```bash
+# Option A: API key from https://console.x.ai
+export XAI_API_KEY=xai-...
+
+# Option B: browser / device login once
+grok login
+
+# Then:
+npx deepsec init --agent grok --model grok-4.5
+# or, later:
+pnpm deepsec process --project-id my-app --agent grok --model grok-4.5
+```
+
+Requires the `grok` binary on `PATH` (or `GROK_EXECUTABLE`). Each batch runs
+with an isolated `GROK_HOME` (auth mirrored, skills/plugins not loaded),
+`--tools read_file,grep,list_dir,run_terminal_cmd`, and `--sandbox read-only`
+by default (`DEEPSEC_GROK_SANDBOX` overrides; nested sandbox is off when
+`DEEPSEC_INSIDE_SANDBOX=1`).
 
 Interactive one-shot setup recommends five benchmark-backed combinations:
 GPT-5.6 Sol, Claude Opus 5, Kimi K3, Grok 4.5, and the current DeepSeek entry.

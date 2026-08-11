@@ -48,6 +48,10 @@ const DEFAULTS: Record<string, { env: string; baseUrl: string }> = {
     env: "OPENAI_API_KEY",
     baseUrl: "https://api.openai.com/v1",
   },
+  xai: {
+    env: "XAI_API_KEY",
+    baseUrl: "https://api.x.ai/v1",
+  },
 };
 
 function checkedUrl(value: string, label: string): URL {
@@ -66,6 +70,12 @@ export function modelRouteCompatibilityError(
   route: ModelRoute,
   agentType: string,
 ): string | undefined {
+  // Grok Build authenticates via XAI_API_KEY / `grok login`, not AI Gateway
+  // or the OpenAI/Anthropic direct routes. Leave env alone and let preflight
+  // check the Grok CLI credentials instead.
+  if (agentType === "grok" || agentType === "grok-build") {
+    return `Grok Build does not use the configured model route (uses XAI_API_KEY / grok login)`;
+  }
   if (route.mode === "custom" && agentType !== "pi") {
     return `Custom model routes require --agent pi (received ${agentType})`;
   }
