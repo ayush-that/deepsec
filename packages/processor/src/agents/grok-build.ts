@@ -73,7 +73,7 @@ const GROK_ENV_ALLOWLIST = new Set<string>([
   "RUST_BACKTRACE",
 ]);
 
-export interface GrokJsonResult {
+interface GrokJsonResult {
   text?: string;
   stopReason?: string;
   sessionId?: string;
@@ -142,7 +142,7 @@ export function makeIsolatedGrokHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "deepsec-grok-home-"));
   fs.writeFileSync(
     path.join(home, "config.toml"),
-    ['[ui]', 'permission_mode = "dontAsk"', "", "[cli]", "auto_update = false", ""].join("\n"),
+    ["[ui]", 'permission_mode = "dontAsk"', "", "[cli]", "auto_update = false", ""].join("\n"),
     { mode: 0o600 },
   );
 
@@ -193,14 +193,14 @@ function extractJsonObject(text: string): string | undefined {
   if (start < 0) return undefined;
   let depth = 0;
   let inString = false;
-  let escape = false;
+  let escaped = false;
   for (let i = start; i < text.length; i++) {
     const ch = text[i];
     if (inString) {
-      if (escape) {
-        escape = false;
+      if (escaped) {
+        escaped = false;
       } else if (ch === "\\") {
-        escape = true;
+        escaped = true;
       } else if (ch === '"') {
         inString = false;
       }
@@ -250,7 +250,7 @@ function metaFromGrokJson(raw: GrokJsonResult): Partial<BatchMeta> {
   return meta;
 }
 
-export async function runGrokHeadless(opts: GrokRunOptions): Promise<GrokRunResult> {
+async function runGrokHeadless(opts: GrokRunOptions): Promise<GrokRunResult> {
   const bin = resolveGrokBinary();
   const grokHome = opts.grokHome ?? makeIsolatedGrokHome();
   const ownHome = opts.grokHome === undefined;
