@@ -141,9 +141,7 @@ function strongest(results: BenchmarkResult[], modelId: string): BenchmarkResult
 function configuredModel(result: BenchmarkResult): string {
   if (result.harness === "pi") return result.modelId;
   if (result.harness === "grok") {
-    return result.modelId.startsWith("xai/")
-      ? result.modelId.slice("xai/".length)
-      : result.model;
+    return result.modelId.startsWith("xai/") ? result.modelId.slice("xai/".length) : result.model;
   }
   return result.model;
 }
