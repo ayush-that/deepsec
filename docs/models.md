@@ -10,7 +10,7 @@ deepsec talks to LLMs through interchangeable agent backends:
 | `codex` (default)           | `gpt-5.5`             | `process`, `revalidate`      |
 | `claude`                    | `claude-opus-4-8`     | `process`, `revalidate`      |
 | `pi`                        | `zai/glm-5.2`         | `process`, `revalidate`      |
-| `grok`                      | `grok-4.5`            | `process`, `revalidate`      |
+| `grok`                      | `grok-4.6`            | `process`, `revalidate`      |
 | `claude` (triage)           | `claude-sonnet-4-6`   | `triage` (Claude-only)       |
 
 Interactive one-shot setup recommends five benchmark-backed combinations:
@@ -75,7 +75,7 @@ pnpm deepsec process --project-id my-app --agent pi --model zai/glm-5.2
 pnpm deepsec process --project-id my-app --agent grok
 
 # Grok Build CLI, specific model:
-pnpm deepsec process --project-id my-app --agent grok --model grok-4.5
+pnpm deepsec process --project-id my-app --agent grok --model grok-4.6
 
 # Triage uses Claude; pass a cheaper model if you want:
 pnpm deepsec triage --project-id my-app --model claude-haiku-4-5
@@ -177,7 +177,7 @@ repeatable `--ai-header name=value` remain available as Pi runtime overrides.
 
 Grok spawns the local [Grok Build](https://x.ai/cli) CLI (`grok`) headlessly
 with the same deepsec prompt/schema as the other backends. Default model is
-`grok-4.5`. Auth is `XAI_API_KEY` or a prior `grok login` (the binary must be
+`grok-4.6`. Auth is `XAI_API_KEY` or a prior `grok login` (the binary must be
 on `PATH`, or set `GROK_EXECUTABLE`):
 
 ```bash

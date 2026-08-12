@@ -16,7 +16,7 @@ export function defaultModelForAgent(agentType: string): string {
       return "zai/glm-5.2";
     case "grok":
     case "grok-build":
-      return "grok-4.5";
+      return "grok-4.6";
     default:
       return "claude-opus-4-8";
   }

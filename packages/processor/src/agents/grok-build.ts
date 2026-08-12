@@ -39,7 +39,7 @@ import type {
   SetupTaskParams,
 } from "./types.js";
 
-const DEFAULT_MODEL = "grok-4.5";
+const DEFAULT_MODEL = "grok-4.6";
 const DEFAULT_THINKING_LEVEL = "xhigh";
 
 const INVESTIGATE_TOOLS = "read_file,grep,list_dir,run_terminal_cmd";
