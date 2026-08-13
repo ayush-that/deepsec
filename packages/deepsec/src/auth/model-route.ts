@@ -1,6 +1,6 @@
 import { getVercelOidcToken } from "@vercel/oidc";
 
-export type ModelAuthMode = "gateway" | "direct" | "custom";
+export type ModelAuthMode = "gateway" | "direct" | "custom" | "local";
 export type CredentialHeaderScheme = "bearer" | "raw";
 
 export interface ModelRoute {
@@ -133,6 +133,15 @@ export async function resolveModelRoute(
     return resolveGrokModelRoute(env);
   }
   assertCompatible(route, options.agentType);
+
+  if (route.mode === "local") {
+    // Local subscriptions delegate auth to the machine-wide claude/codex/pi
+    // login. There is no env var to read and no header to broker, so this
+    // route can never be resolved — callers must short-circuit before here.
+    throw new Error(
+      "Local-subscription model routes rely on machine-wide agent logins and have no brokered credential",
+    );
+  }
 
   if (route.mode === "gateway") {
     if (route.provider !== "vercel") {
