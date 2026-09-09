@@ -188,6 +188,13 @@ function sandboxProfile(): string {
   return process.env.DEEPSEC_GROK_SANDBOX ?? "read-only";
 }
 
+export function isGrokSandboxApplyFailure(text: string): boolean {
+  return (
+    /sandbox could not be applied/i.test(text) ||
+    /could not apply the .+ sandbox profile/i.test(text)
+  );
+}
+
 function extractJsonObject(text: string): string | undefined {
   const start = text.indexOf("{");
   if (start < 0) return undefined;
@@ -307,13 +314,31 @@ async function runGrokHeadless(opts: GrokRunOptions): Promise<GrokRunResult> {
   });
 
   try {
-    const { stdout, stderr, code } = await spawnCollect({
+    let { stdout, stderr, code } = await spawnCollect({
       bin,
       args,
       env,
       cwd: opts.projectRoot,
       signal: opts.signal,
     });
+
+    if (code !== 0 && sandbox !== "off") {
+      const sandboxErr = (stderr || stdout || "").trim();
+      if (isGrokSandboxApplyFailure(sandboxErr)) {
+        opts.onProgress?.({
+          type: "thinking",
+          message: "Grok host sandbox could not be applied; retrying with --sandbox off",
+        });
+        args[args.indexOf("--sandbox") + 1] = "off";
+        ({ stdout, stderr, code } = await spawnCollect({
+          bin,
+          args,
+          env,
+          cwd: opts.projectRoot,
+          signal: opts.signal,
+        }));
+      }
+    }
 
     if (code !== 0) {
       const errText = (stderr || stdout || `exit ${code}`).trim();

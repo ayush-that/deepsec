@@ -2,7 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildGrokEnv, makeIsolatedGrokHome, parseGrokStdout } from "../agents/grok-build.js";
+import {
+  buildGrokEnv,
+  isGrokSandboxApplyFailure,
+  makeIsolatedGrokHome,
+  parseGrokStdout,
+} from "../agents/grok-build.js";
 import { createDefaultAgentRegistry } from "../index.js";
 
 const homes: string[] = [];
@@ -54,6 +59,15 @@ describe("Grok Build agent", () => {
     expect(raw.text).toBe('{"ok":true}');
     expect(raw.sessionId).toBe("abc");
     expect(raw.usage?.input_tokens).toBe(12);
+  });
+
+  it("detects grok host-sandbox apply failures", () => {
+    expect(
+      isGrokSandboxApplyFailure(
+        "warning: sandbox could not be applied: runtime-socket deny resolution failed: could not resolve runtime-socket deny path /var/run/docker.sock: endpoint is a symlink\nerror: could not apply the 'read-only' sandbox profile; see the warning above for the cause. Refusing to start with its protections missing.",
+      ),
+    ).toBe(true);
+    expect(isGrokSandboxApplyFailure("Grok produced no result text")).toBe(false);
   });
 
   it("makeIsolatedGrokHome creates a config and mirrors auth when available", () => {
