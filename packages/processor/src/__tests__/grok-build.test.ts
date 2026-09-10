@@ -35,6 +35,7 @@ describe("Grok Build agent", () => {
       process.env.PATH = "/usr/bin";
       process.env.HOME = "/Users/test";
       process.env.XAI_API_KEY = "xai-test-key";
+      process.env.GROK_SANDBOX = "off";
       process.env.GITHUB_TOKEN = "should-not-leak";
       process.env.AWS_SECRET_ACCESS_KEY = "should-not-leak";
       process.env.LC_ALL = "en_US.UTF-8";
@@ -45,6 +46,7 @@ describe("Grok Build agent", () => {
       expect(env.XAI_API_KEY).toBe("xai-test-key");
       expect(env.PATH).toBe("/usr/bin");
       expect(env.LC_ALL).toBe("en_US.UTF-8");
+      expect(env.GROK_SANDBOX).toBeUndefined();
       expect(env.GITHUB_TOKEN).toBeUndefined();
       expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
     } finally {

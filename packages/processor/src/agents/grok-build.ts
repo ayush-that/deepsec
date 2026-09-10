@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -68,10 +68,11 @@ const GROK_ENV_ALLOWLIST = new Set<string>([
   "PWD",
   "GROK_HOME",
   "GROK_DISABLE_AUTOUPDATER",
-  "GROK_SANDBOX",
   "RUST_LOG",
   "RUST_BACKTRACE",
 ]);
+
+const GROK_OUTPUT_CAP = 4 * 1024 * 1024;
 
 interface GrokJsonResult {
   text?: string;
@@ -153,12 +154,12 @@ export function makeIsolatedGrokHome(): string {
   for (const userHome of userHomes) {
     const auth = path.join(userHome, "auth.json");
     if (!fs.existsSync(auth)) continue;
-    const dst = path.join(home, "auth.json");
     try {
-      fs.symlinkSync(auth, dst);
+      fs.symlinkSync(auth, path.join(home, "auth.json"));
     } catch {
-      fs.copyFileSync(auth, dst);
-      fs.chmodSync(dst, 0o600);
+      throw new Error(
+        `Could not link grok login from ${auth}. Export XAI_API_KEY instead of copying credentials into the temp home.`,
+      );
     }
     break;
   }
@@ -314,7 +315,7 @@ async function runGrokHeadless(opts: GrokRunOptions): Promise<GrokRunResult> {
   });
 
   try {
-    let { stdout, stderr, code } = await spawnCollect({
+    const { stdout, stderr, code } = await spawnCollect({
       bin,
       args,
       env,
@@ -322,22 +323,12 @@ async function runGrokHeadless(opts: GrokRunOptions): Promise<GrokRunResult> {
       signal: opts.signal,
     });
 
-    if (code !== 0 && sandbox !== "off") {
-      const sandboxErr = (stderr || stdout || "").trim();
-      if (isGrokSandboxApplyFailure(sandboxErr)) {
-        opts.onProgress?.({
-          type: "thinking",
-          message: "Grok host sandbox could not be applied; retrying with --sandbox off",
-        });
-        args[args.indexOf("--sandbox") + 1] = "off";
-        ({ stdout, stderr, code } = await spawnCollect({
-          bin,
-          args,
-          env,
-          cwd: opts.projectRoot,
-          signal: opts.signal,
-        }));
-      }
+    if (code !== 0 && sandbox !== "off" && isGrokSandboxApplyFailure(stderr)) {
+      throw new Error(
+        `Grok host sandbox (${sandbox}) could not be applied. ` +
+          `Set DEEPSEC_GROK_SANDBOX=off to run without the host sandbox, then retry.\n` +
+          stderr.trim().slice(0, 400),
+      );
     }
 
     if (code !== 0) {
@@ -394,6 +385,25 @@ async function runGrokHeadless(opts: GrokRunOptions): Promise<GrokRunResult> {
   }
 }
 
+function appendCapped(current: string, chunk: string, max: number): string {
+  if (current.length >= max) return current;
+  return current + chunk.slice(0, max - current.length);
+}
+
+function killGrokChild(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (!child.pid) return;
+  try {
+    if (process.platform === "win32") child.kill(signal);
+    else process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // already exited
+    }
+  }
+}
+
 function spawnCollect(params: {
   bin: string;
   args: string[];
@@ -411,6 +421,7 @@ function spawnCollect(params: {
       cwd: params.cwd,
       env: params.env,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
     });
 
     let stdout = "";
@@ -419,20 +430,16 @@ function spawnCollect(params: {
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
-      stdout += chunk;
+      stdout = appendCapped(stdout, chunk, GROK_OUTPUT_CAP);
     });
     child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
+      stderr = appendCapped(stderr, chunk, GROK_OUTPUT_CAP);
     });
 
     const onAbort = () => {
-      child.kill("SIGTERM");
+      killGrokChild(child, "SIGTERM");
       killTimer = setTimeout(() => {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          // ignore
-        }
+        killGrokChild(child, "SIGKILL");
       }, 2_000);
       killTimer.unref?.();
     };

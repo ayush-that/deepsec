@@ -106,14 +106,14 @@ export async function ensureConnectedWorkspace(
   const now = (deps.now ?? (() => new Date()))();
   const ttl = options.verificationTtlMs ?? 24 * 60 * 60 * 1000;
 
-  if (options.modelRoute.mode === "local") {
-    // Local subscriptions delegate model auth to the machine-wide
-    // claude/codex/pi logins, and nothing else in host-side setup needs the
-    // platform. Linking anyway would prompt for the Vercel login the user
-    // just declined and leave a VERCEL_OIDC_TOKEN in .env.local that every
-    // later run expands into ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN,
-    // routing past the login they chose. Sandbox commands do need the
-    // platform and assert their own credential when they run.
+  const grokOnly = options.agentTypes.every(isGrokAgent);
+  if (options.modelRoute.mode === "local" || grokOnly) {
+    // Local subscriptions and Grok Build both use machine-wide logins / XAI_API_KEY.
+    // Do not link Vercel or persist a fabricated xai route; that would overwrite
+    // the workspace ai config and later misroute Codex/Claude credentials.
+    if (grokOnly) {
+      for (const agentType of options.agentTypes) assertAgentCredential(agentType);
+    }
     const verification: ConnectionVerificationCheckpoint = {
       route: options.modelRoute,
       agentTypes: [...options.agentTypes],
@@ -159,9 +159,6 @@ export async function ensureConnectedWorkspace(
 
   const resolvedRoutes: ResolvedModelRoute[] = [];
   for (const agentType of options.agentTypes) {
-    if (isGrokAgent(agentType)) {
-      assertAgentCredential(agentType);
-    }
     const resolved = await (deps.resolveRoute ?? resolveModelRoute)(options.modelRoute, {
       agentType,
       env,

@@ -173,6 +173,16 @@ function canonicalHarness(value: string | undefined): ModelHarness | undefined {
   return undefined;
 }
 
+function remapGrokRecommendation(choice: RecommendedModelChoice): RecommendedModelChoice {
+  if (choice.agent === "grok" || !/^(?:xai\/)?grok-/i.test(choice.modelId)) return choice;
+  return {
+    ...choice,
+    agent: "grok",
+    harness: "grok",
+    configuredModel: modelForHarness(choice.modelId, "grok"),
+  };
+}
+
 function compatibleHarness(route: ModelRoute, requested?: string): ModelHarness | undefined {
   const requestedHarness = canonicalHarness(requested);
   if (requestedHarness === "grok") return "grok";
@@ -211,9 +221,9 @@ export async function resolveModelProfile(options: {
 > {
   const benchmark = await fetchBenchmarkResults(options.fetchImpl);
   const requiredHarness = compatibleHarness(options.route, options.agent);
-  const choices = buildRecommendedModelChoices(benchmark.results).filter(
-    (choice) => !requiredHarness || choice.agent === requiredHarness,
-  );
+  const choices = buildRecommendedModelChoices(benchmark.results)
+    .map((choice) => (requiredHarness === "grok" ? remapGrokRecommendation(choice) : choice))
+    .filter((choice) => !requiredHarness || choice.agent === requiredHarness);
   const byScore = [...choices].sort((left, right) => right.score - left.score);
   const selected =
     options.profile === "best"
@@ -243,7 +253,7 @@ export async function resolveModelProfile(options: {
 export function inferModelHarness(slug: string): ModelHarness {
   if (/^(?:openai\/)?gpt-/i.test(slug)) return "codex";
   if (/^(?:anthropic\/)?claude-/i.test(slug)) return "claude";
-  if (/^(?:xai\/)?grok-/i.test(slug)) return "grok";
+  if (/^grok-/i.test(slug)) return "grok";
   if (slug.includes("/")) return "pi";
   return "pi";
 }
@@ -279,21 +289,7 @@ export async function promptForModelSelection(options: {
   const requiredHarness = compatibleHarness(options.route, options.agent);
   const recommendations = buildRecommendedModelChoices(benchmark.results);
   const choices = recommendations
-    .map((choice) => {
-      if (
-        requiredHarness === "grok" &&
-        choice.agent !== "grok" &&
-        /^(?:xai\/)?grok-/i.test(choice.modelId)
-      ) {
-        return {
-          ...choice,
-          agent: "grok" as const,
-          harness: "grok" as const,
-          configuredModel: modelForHarness(choice.modelId, "grok"),
-        };
-      }
-      return choice;
-    })
+    .map((choice) => (requiredHarness === "grok" ? remapGrokRecommendation(choice) : choice))
     .filter((choice) => !requiredHarness || choice.agent === requiredHarness);
   const prompt = createInterface({ input: process.stdin, output: process.stdout });
   try {

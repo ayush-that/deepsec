@@ -193,8 +193,12 @@ export XAI_API_KEY=xai-...
 pnpm deepsec process --project-id my-app --agent grok
 ```
 
-Sandbox mode does not support `--agent grok` yet. Use a local `process` or
-`revalidate` run instead.
+Sandbox mode (`sandbox` and `sandbox-all`) does not support `--agent grok`
+yet. Use a local `process` or `revalidate` run instead.
+
+Grok's host `read-only` sandbox is the default. If the profile cannot be
+applied (common on Docker Desktop), the run fails closed. Set
+`DEEPSEC_GROK_SANDBOX=off` to opt out of the host sandbox.
 
 ### `claude-sonnet-4-6` for `triage`
 
