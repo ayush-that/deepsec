@@ -392,9 +392,23 @@ function appendCapped(current: string, chunk: string, max: number): string {
 
 function killGrokChild(child: ChildProcess, signal: NodeJS.Signals): void {
   if (!child.pid) return;
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    killer.on("error", () => {
+      try {
+        child.kill(signal);
+      } catch {
+        // already exited
+      }
+    });
+    killer.unref();
+    return;
+  }
   try {
-    if (process.platform === "win32") child.kill(signal);
-    else process.kill(-child.pid, signal);
+    process.kill(-child.pid, signal);
   } catch {
     try {
       child.kill(signal);

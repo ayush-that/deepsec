@@ -171,4 +171,19 @@ describe("DeepSecBench model picker", () => {
       }),
     ).resolves.toMatchObject({ agent: "grok", model: "grok-4.5" });
   });
+
+  it("remaps the offline fallback Grok Pi entry for headless --agent grok", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("offline");
+    }) as unknown as typeof fetch;
+
+    await expect(
+      resolveModelProfile({
+        profile: "best",
+        route: { mode: "gateway", provider: "vercel" },
+        agent: "grok",
+        fetchImpl,
+      }),
+    ).resolves.toMatchObject({ agent: "grok", model: "grok-4.5", live: false });
+  });
 });

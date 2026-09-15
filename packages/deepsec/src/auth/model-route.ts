@@ -87,30 +87,6 @@ export function modelRouteCompatibilityError(
   return undefined;
 }
 
-function resolveGrokModelRoute(env: NodeJS.ProcessEnv): ResolvedModelRoute {
-  const credentialEnv = "XAI_API_KEY";
-  const credential = env[credentialEnv] ?? "";
-  return {
-    route: {
-      mode: "direct",
-      provider: "xai",
-      apiKeyEnv: credentialEnv,
-      baseUrl: "https://api.x.ai/v1",
-    },
-    credentialEnv,
-    credential,
-    environment: credential ? { XAI_API_KEY: credential } : {},
-    broker: {
-      host: "api.x.ai",
-      placeholderEnv: credentialEnv,
-      header: {
-        name: "authorization",
-        value: credential ? `Bearer ${credential}` : "",
-      },
-    },
-  };
-}
-
 function assertCompatible(route: ModelRoute, agentType: string): void {
   const error = modelRouteCompatibilityError(route, agentType);
   if (error) throw new Error(error);
@@ -130,7 +106,9 @@ export async function resolveModelRoute(
 ): Promise<ResolvedModelRoute> {
   const env = options.env ?? process.env;
   if (isGrokAgent(options.agentType)) {
-    return resolveGrokModelRoute(env);
+    throw new Error(
+      "Grok Build authenticates through XAI_API_KEY or grok login and has no brokered model route",
+    );
   }
   assertCompatible(route, options.agentType);
 
@@ -287,8 +265,6 @@ export async function verifyModelRouteWithFetch(
   route: ResolvedModelRoute,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  if (route.route.provider === "xai" && !route.credential) return;
-
   const endpoint = modelsEndpoint(route);
   const headers: Record<string, string> = {
     [route.broker.header.name]: route.broker.header.value,

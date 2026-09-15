@@ -84,7 +84,7 @@ describe("Grok Build agent", () => {
       const home = makeIsolatedGrokHome();
       homes.push(home);
       expect(fs.existsSync(path.join(home, "config.toml"))).toBe(true);
-      expect(fs.existsSync(path.join(home, "auth.json"))).toBe(true);
+      expect(fs.lstatSync(path.join(home, "auth.json")).isSymbolicLink()).toBe(true);
       expect(fs.existsSync(path.join(home, "skills"))).toBe(false);
     } finally {
       if (prev === undefined) delete process.env.GROK_HOME;

@@ -8,24 +8,16 @@ describe("resolveModelRoute", () => {
     ).rejects.toThrow(/machine-wide agent logins/);
   });
 
-  it("resolves Grok Build to an XAI route independent of the stored gateway config", async () => {
-    const resolved = await resolveModelRoute(
-      { mode: "gateway", provider: "vercel" },
-      { agentType: "grok", env: { XAI_API_KEY: "xai-secret" } },
-    );
-    expect(resolved.route.provider).toBe("xai");
-    expect(resolved.environment.XAI_API_KEY).toBe("xai-secret");
-    expect(resolved.broker.host).toBe("api.x.ai");
-  });
-
-  it("allows Grok Build without XAI_API_KEY (OAuth / grok login)", async () => {
-    const resolved = await resolveModelRoute(
-      { mode: "gateway", provider: "vercel" },
-      { agentType: "grok", env: {} },
-    );
-    expect(resolved.route.provider).toBe("xai");
-    expect(resolved.credential).toBe("");
-    expect(resolved.environment.XAI_API_KEY).toBeUndefined();
+  it("refuses to fabricate a brokered route for Grok Build credentials", async () => {
+    await expect(
+      resolveModelRoute(
+        { mode: "gateway", provider: "vercel" },
+        { agentType: "grok", env: { XAI_API_KEY: "xai-secret" } },
+      ),
+    ).rejects.toThrow(/has no brokered model route/);
+    await expect(
+      resolveModelRoute({ mode: "gateway", provider: "vercel" }, { agentType: "grok", env: {} }),
+    ).rejects.toThrow(/has no brokered model route/);
   });
 
   it("still rejects an explicitly selected route that is incompatible with the harness", async () => {

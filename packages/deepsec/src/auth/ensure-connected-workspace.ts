@@ -112,7 +112,7 @@ export async function ensureConnectedWorkspace(
     // Do not link Vercel or persist a fabricated xai route; that would overwrite
     // the workspace ai config and later misroute Codex/Claude credentials.
     if (grokOnly) {
-      for (const agentType of options.agentTypes) assertAgentCredential(agentType);
+      for (const agentType of options.agentTypes) assertAgentCredential(agentType, { env });
     }
     const verification: ConnectionVerificationCheckpoint = {
       route: options.modelRoute,
@@ -179,7 +179,6 @@ export async function ensureConnectedWorkspace(
   );
   if (!reuseModel) {
     for (const resolved of resolvedRoutes) {
-      if (resolved.route.provider === "xai" && !resolved.credential) continue;
       await (deps.verifyModelRoute ?? verifyModelRouteWithFetch)(resolved);
     }
   }

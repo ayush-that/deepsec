@@ -15,6 +15,7 @@ import { getConfig } from "@deepsec/core";
 import { getVercelOidcToken } from "@vercel/oidc";
 import {
   applyResolvedModelRoute,
+  isGrokAgent,
   type ModelRoute,
   modelRouteCompatibilityError,
   type ResolvedModelRoute,
@@ -139,6 +140,7 @@ export async function applyConfiguredModelRoute(
 ): Promise<ResolvedModelRoute | undefined> {
   const route = getConfig()?.ai as ModelRoute | undefined;
   if (!route) return undefined;
+  if (isGrokAgent(agentType)) return undefined;
   // A persisted route is a default, not an explicit command-line request.
   // Preserve the pre-onboarding behavior for cross-agent invocations by
   // falling back to that harness's normal credential discovery.
@@ -227,9 +229,9 @@ function hasLocalPiAgent(): boolean {
   return existsSync(join(piHome, "auth.json"));
 }
 
-function hasLocalGrokAgent(): boolean {
-  if (process.env.XAI_API_KEY) return true;
-  const homes = [process.env.GROK_HOME, join(homedir(), ".grok")].filter(
+function hasLocalGrokAgent(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.XAI_API_KEY) return true;
+  const homes = [env.GROK_HOME, join(homedir(), ".grok")].filter(
     (p): p is string => typeof p === "string" && p.length > 0,
   );
   for (const home of homes) {
@@ -265,9 +267,15 @@ const KNOWN_BACKENDS = new Set<string>(["claude-agent-sdk", "codex", "pi", "grok
  */
 export function assertAgentCredential(
   agentType: string | undefined,
-  options: { inSandbox?: boolean; aiApiKeyEnv?: string; modelRoute?: ModelRoute } = {},
+  options: {
+    inSandbox?: boolean;
+    aiApiKeyEnv?: string;
+    modelRoute?: ModelRoute;
+    env?: NodeJS.ProcessEnv;
+  } = {},
 ): void {
   if (agentType !== undefined && !KNOWN_BACKENDS.has(agentType)) return;
+  const env = options.env ?? process.env;
 
   // A local-subscription route is the user saying "claude/codex are set up
   // machine-wide" — skip the env-var checks entirely and let the agent SDK
@@ -278,11 +286,11 @@ export function assertAgentCredential(
   const selectedRoute = options.modelRoute ?? (getConfig()?.ai as ModelRoute | undefined);
   if (selectedRoute?.mode === "local" && !options.inSandbox) return;
 
-  const gateway = process.env.AI_GATEWAY_API_KEY;
-  const anthropic = process.env.ANTHROPIC_AUTH_TOKEN;
-  const anthropicApi = process.env.ANTHROPIC_API_KEY;
-  const openai = process.env.OPENAI_API_KEY;
-  const custom = options.aiApiKeyEnv ? process.env[options.aiApiKeyEnv] : undefined;
+  const gateway = env.AI_GATEWAY_API_KEY;
+  const anthropic = env.ANTHROPIC_AUTH_TOKEN;
+  const anthropicApi = env.ANTHROPIC_API_KEY;
+  const openai = env.OPENAI_API_KEY;
+  const custom = options.aiApiKeyEnv ? env[options.aiApiKeyEnv] : undefined;
 
   // A selected route has already made precedence explicit. In particular,
   // direct Anthropic uses ANTHROPIC_API_KEY and its x-api-key broker contract;
@@ -295,7 +303,7 @@ export function assertAgentCredential(
         : options.modelRoute.provider === "anthropic"
           ? "ANTHROPIC_API_KEY"
           : "OPENAI_API_KEY");
-    if (process.env[keyEnv]) return;
+    if (env[keyEnv]) return;
     throw new Error(`Selected ${options.modelRoute.provider} model route requires ${keyEnv}`);
   }
 
@@ -327,8 +335,8 @@ export function assertAgentCredential(
   }
 
   if (isGrok(agentType)) {
-    if (process.env.XAI_API_KEY) return;
-    if (!options.inSandbox && hasLocalGrokAgent()) return;
+    if (env.XAI_API_KEY) return;
+    if (!options.inSandbox && hasLocalGrokAgent(env)) return;
     throw new Error(
       `Missing AI credentials for --agent grok.\n` +
         `\n` +
