@@ -10,6 +10,13 @@ If a run is interrupted or errors out partway through, just re-run the same
 command — deepsec picks up where it left off, skipping files it already
 analyzed and only investigating the rest.
 
+<p>
+  <a href="https://vercel.com/labs#labs-products"><img alt="Vercel Labs Product" src="https://img.shields.io/badge/LABS-PRODUCT-0a0a0a.svg?style=for-the-badge&amp;logo=Vercel&amp;labelColor=000000" height="28"></a>
+  <a href="https://www.npmjs.com/package/deepsec"><img alt="npm version: deepsec" src="https://img.shields.io/npm/v/deepsec.svg?style=for-the-badge&amp;labelColor=000000" height="28"></a>
+  <a href="https://github.com/vercel-labs/deepsec/blob/main/LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/github/license/vercel-labs/deepsec.svg?style=for-the-badge&amp;labelColor=000000" height="28"></a>
+  <a href="https://www.npmjs.com/package/deepsec"><img alt="npm downloads per month: deepsec" src="https://img.shields.io/npm/dm/deepsec.svg?style=for-the-badge&amp;labelColor=000000&amp;label=npm%20downloads" height="28"></a>
+</p>
+
 ## Get started
 
 From the root of the repository you want to scan:
